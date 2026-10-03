@@ -6,6 +6,27 @@ import { mergeSongs } from '../library/importers';
 import { backupFile, download, safeFileName } from '../storage/storage';
 import { artistsOf, Cover, PlayButton } from './common';
 import { groupName } from './Play';
+import { TournamentStatsView } from './Stats';
+
+function Confetti() {
+  const colors = ['var(--accent)', 'var(--violet)', '#ffffff', 'var(--warn)'];
+  return (
+    <div className="confetti" aria-hidden="true">
+      {Array.from({ length: 36 }, (_, i) => (
+        <i
+          key={i}
+          style={{
+            left: `${(i * 37) % 100}%`,
+            background: colors[i % colors.length],
+            animationDelay: `${(i % 12) * 0.12}s`,
+            animationDuration: `${2.4 + (i % 5) * 0.35}s`,
+            transform: `rotate(${i * 29}deg)`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 import { useStore } from './store';
 
 export function Result({ id }: { id: string }) {
@@ -43,6 +64,25 @@ export function Result({ id }: { id: string }) {
   const finalOrder = fin?.outcome?.order;
   const groups = eliminationGroups(state);
 
+  const share = async () => {
+    const lines = [
+      `🏆 Mein Music-Cypher-Gewinner: ${songLine(champ)}`,
+      state.runnerUp ? `🥈 Finale: ${songLine(songs.get(state.runnerUp))}` : '',
+      `${t.name} · ${t.songs.length} Songs`,
+      champ.spotifyTrackId ? `https://open.spotify.com/track/${champ.spotifyTrackId}` : '',
+    ].filter(Boolean);
+    const text = lines.join('\n');
+    try {
+      if (navigator.share) await navigator.share({ text });
+      else {
+        await navigator.clipboard.writeText(text);
+        toast('Ergebnis in die Zwischenablage kopiert.');
+      }
+    } catch {
+      /* user cancelled */
+    }
+  };
+
   const sameSelection = () => {
     updateLibrary((l) => {
       const m = mergeSongs(l.songs, t.songs);
@@ -56,6 +96,7 @@ export function Result({ id }: { id: string }) {
   return (
     <div className="stack">
       <section className="winner">
+        <Confetti />
         <Cover song={champ} size={200} />
         <div className="crown">Dein Gewinner</div>
         <h1>{champ.title}</h1>
@@ -65,6 +106,9 @@ export function Result({ id }: { id: string }) {
         </div>
         <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
           <PlayButton song={champ} />
+          <button className="btn" onClick={share}>
+            Teilen
+          </button>
         </div>
         <p className="tiny faint" style={{ marginTop: 16, marginBottom: 0 }}>
           {t.name} · {t.songs.length} Songs · Ergebnis deiner persönlichen Entscheidungen
@@ -134,6 +178,16 @@ export function Result({ id }: { id: string }) {
           </ol>
         </section>
       </div>
+
+      <section>
+        <div className="section-title">
+          <h2 style={{ margin: 0 }}>Turnier in Zahlen</h2>
+          <button className="btn small ghost" onClick={() => go({ page: 'stats', id: t.id })}>
+            Alle Statistiken →
+          </button>
+        </div>
+        <TournamentStatsView t={t} compact />
+      </section>
 
       {groups.length > 0 && (
         <section className="card">

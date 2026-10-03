@@ -68,6 +68,14 @@ export function Home() {
           <strong>Demo ausprobieren</strong>
           <span className="muted small">24 erfundene Beispielsongs mit Demo-Klängen</span>
         </button>
+        {tournaments.length > 0 && (
+          <button className="action-tile" onClick={() => go({ page: 'stats' })}>
+            <strong>Statistiken</strong>
+            <span className="muted small">
+              {done.length} abgeschlossen · {running.length} laufend · Hall of Fame
+            </span>
+          </button>
+        )}
         <button className="action-tile" onClick={() => fileRef.current?.click()}>
           <strong>Sicherung laden</strong>
           <span className="muted small">Ein exportiertes Turnier wiederherstellen</span>

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { computeState, reopen } from '../domain/engine';
 import type { MatchState, PlayoffState, RoundState, Song } from '../domain/types';
 import { Modal, Seg } from './common';
+import { TournamentStatsView } from './Stats';
 import { describeTarget, groupName } from './Play';
 import { useStore } from './store';
 
@@ -10,7 +11,7 @@ export function Overview({ id }: { id: string }) {
   const t = tournaments.find((x) => x.id === id);
   const state = useMemo(() => (t ? computeState(t) : null), [t]);
   const [roundIdx, setRoundIdx] = useState<number | null>(null);
-  const [view, setView] = useState<'list' | 'tree'>('list');
+  const [view, setView] = useState<'list' | 'tree' | 'stats'>('list');
   const [reopenId, setReopenId] = useState<string | null>(null);
 
   if (!t || !state) {
@@ -46,19 +47,20 @@ export function Overview({ id }: { id: string }) {
         )}
       </div>
 
-      {t.config.format === 'duel' && (
-        <Seg
-          label="Ansicht"
-          value={view}
-          onChange={setView}
-          options={[
-            { value: 'list', label: 'Rundenliste' },
-            { value: 'tree', label: 'Turnierbaum' },
-          ]}
-        />
-      )}
+      <Seg
+        label="Ansicht"
+        value={view}
+        onChange={setView}
+        options={[
+          { value: 'list', label: t.config.format === 'duel' ? 'Rundenliste' : 'Gruppen' },
+          ...(t.config.format === 'duel' ? [{ value: 'tree' as const, label: 'Turnierbaum' }] : []),
+          { value: 'stats', label: 'Statistik' },
+        ]}
+      />
 
-      {view === 'tree' && t.config.format === 'duel' ? (
+      {view === 'stats' ? (
+        <TournamentStatsView t={t} />
+      ) : view === 'tree' && t.config.format === 'duel' ? (
         <div className="bracket" aria-label="Turnierbaum">
           {state.rounds.map((r) => (
             <div className="col" key={r.index}>

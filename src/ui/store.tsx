@@ -17,12 +17,14 @@ export type Route =
   | { page: 'setup' }
   | { page: 'play'; id: string }
   | { page: 'overview'; id: string }
-  | { page: 'result'; id: string };
+  | { page: 'result'; id: string }
+  | { page: 'stats'; id?: string };
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   if (parts[0] === 'sammlung') return { page: 'library' };
   if (parts[0] === 'einstellungen') return { page: 'setup' };
+  if (parts[0] === 'statistik') return parts[1] ? { page: 'stats', id: parts[1] } : { page: 'stats' };
   if (parts[0] === 'turnier' && parts[1]) {
     if (parts[2] === 'uebersicht') return { page: 'overview', id: parts[1] };
     if (parts[2] === 'ergebnis') return { page: 'result', id: parts[1] };
@@ -45,6 +47,8 @@ export function routeHash(r: Route): string {
       return `#/turnier/${encodeURIComponent(r.id)}/uebersicht`;
     case 'result':
       return `#/turnier/${encodeURIComponent(r.id)}/ergebnis`;
+    case 'stats':
+      return r.id ? `#/statistik/${encodeURIComponent(r.id)}` : '#/statistik';
   }
 }
 

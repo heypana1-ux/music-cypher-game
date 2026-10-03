@@ -1,12 +1,55 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { addDecision, computeState, findMatch, findPlayoff, relevantTies, undoLast } from '../domain/engine';
 import { newId } from '../domain/rng';
+import { pct, songHistoryIndex } from '../domain/stats';
 import type { Decision, MatchState, PlayoffState, RoundState, Song, Tournament, TournamentState } from '../domain/types';
 import { player, usePlayer } from '../playback/player';
 import { artistsOf, Cover, Modal, PlaybackChip, PlayButton } from './common';
 import { useStore } from './store';
 
 type SongMap = Map<string, Song>;
+
+/** Per-song info line on cards: results so far in this tournament and in earlier ones. */
+const SongInfoCtx = createContext<(songId: string) => ReactNode>(() => null);
+
+function useSongInfo(t: Tournament | undefined, state: TournamentState | null, all: Tournament[]) {
+  const others = all.filter((x) => x.id !== t?.id);
+  const othersKey = others.map((o) => o.id + o.updatedAt).join('|');
+  const history = useMemo(() => songHistoryIndex(others), [othersKey]);
+  return (songId: string): ReactNode => {
+    const parts: ReactNode[] = [];
+    if (state) {
+      for (const r of state.rounds) {
+        for (const m of r.matches) {
+          if (m.status !== 'done' || !m.songIds.includes(songId) || !m.outcome) continue;
+          const q = m.outcome.qualified.includes(songId);
+          const e = r.playoffs.some((p) => p.winners.includes(songId));
+          const score = m.decision?.scores?.[songId];
+          const place = m.outcome.order ? m.outcome.order.indexOf(songId) + 1 : null;
+          parts.push(
+            <span key={m.id} className={q || e ? 'hist-q' : 'hist-x'}>
+              R{r.index + 1} {q ? '✓' : e ? '◆' : '✕'}
+              {score !== undefined ? ` ${score} P.` : place ? ` Pl. ${place}` : ''}
+            </span>,
+          );
+        }
+      }
+    }
+    const h = history.get(songId);
+    if (!parts.length && !h) return null;
+    return (
+      <div className="song-hist">
+        {parts.length > 0 && <div>Bisher: {parts}</div>}
+        {h && (
+          <div className="faint">
+            Früher: {h.appearances}× dabei{h.titles ? ` · ${h.titles}× Sieger 🏆` : h.finals ? ` · ${h.finals}× Finale` : ''}
+            {h.winRate !== null ? ` · ${pct(h.winRate)} weiter` : ''}
+          </div>
+        )}
+      </div>
+    );
+  };
+}
 
 function matchTitle(round: RoundState, m: MatchState): string {
   const real = round.matches.filter((x) => x.kind !== 'bye' && x.kind !== 'thirdPlace');
@@ -40,6 +83,7 @@ export function Play({ id }: { id: string }) {
   const { tournaments, saveTournament, go, toast } = useStore();
   const t = tournaments.find((x) => x.id === id);
   const state = useMemo(() => (t ? computeState(t) : null), [t]);
+  const songInfo = useSongInfo(t, state, tournaments);
   const [focus, setFocus] = useState<string | null>(null);
   const [justDecided, setJustDecided] = useState<string | null>(null);
   const [confirmUndo, setConfirmUndo] = useState(false);
@@ -203,6 +247,7 @@ export function Play({ id }: { id: string }) {
   const postponedOpen = state.openItems.filter((o) => t.postponed.includes(o.id) && o.id !== current.id);
 
   return (
+    <SongInfoCtx.Provider value={songInfo}>
     <div className="stack">
       {header}
       {round.notes.length > 0 && round.matches.every((m) => m.status !== 'done') && (
@@ -248,6 +293,7 @@ export function Play({ id }: { id: string }) {
       )}
       {undoModal}
     </div>
+    </SongInfoCtx.Provider>
   );
 }
 
@@ -281,6 +327,7 @@ function SongCard({
   children?: ReactNode;
 }) {
   const p = usePlayer();
+  const info = useContext(SongInfoCtx)(song.id);
   const playing = p.song?.id === song.id;
   return (
     <article className={`songcard ${picked ? 'picked' : ''} ${playing ? 'playing' : ''} ${dim ? 'out' : ''}`} aria-label={`Song ${index + 1}: ${song.title}`}>
@@ -291,6 +338,7 @@ function SongCard({
         <div className="st">{song.title}</div>
         <div className="sa">{artistsOf(song)}</div>
         {song.album && <div className="tiny faint">{song.album}</div>}
+        {info}
       </div>
       <div>
         <PlaybackChip song={song} />
