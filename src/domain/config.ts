@@ -96,6 +96,11 @@ export function checkConfig(c: TournamentConfig, songCount: number): ConfigCheck
       );
     }
   }
+  if (c.partyPlayers !== undefined) {
+    const names = c.partyPlayers.map((p) => p.trim()).filter(Boolean);
+    if (names.length < 2) errors.push('Für den Partymodus braucht es mindestens zwei Namen.');
+    else if (new Set(names.map((n) => n.toLowerCase())).size !== names.length) errors.push('Im Partymodus braucht jede Person einen eigenen Namen.');
+  }
   if (c.format === 'cypher' && c.evaluation === 'select' && c.extraMode !== 'none') {
     errors.push('Zusatzplätze brauchen eine Rangfolge oder Punkte, damit klar ist, wer Dritter wurde.');
   }
@@ -130,6 +135,8 @@ export function describeConfig(c: TournamentConfig): string[] {
     if (c.reshufflePerRound) lines.push('Gruppen werden jede Runde neu ausgelost.');
   }
   lines.push(c.drawMode === 'random' ? 'Zufällige Auslosung.' : 'Ursprüngliche Reihenfolge als Setzliste.');
+  if (c.blindMode) lines.push('Blind-Modus: Songs bleiben bis zur Entscheidung verdeckt.');
+  if (c.partyPlayers?.length) lines.push(`Partymodus mit ${c.partyPlayers.filter((p) => p.trim()).join(', ')}.`);
   if (c.avoidSameArtist) lines.push('Gleiche Interpreten in Runde 1 möglichst getrennt.');
   return lines;
 }

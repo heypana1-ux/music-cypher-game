@@ -22,6 +22,10 @@ export function Setup() {
   const check = checkConfig(config, n);
   const preview = useMemo(() => (n >= 2 && check.errors.length === 0 ? previewRounds(config, n) : []), [config, n, check.errors.length]);
   const noAudio = selectedSongs.filter((s) => playbackFor(s, localAudio).kind === 'none').length;
+  const spotifyOnly = selectedSongs.filter((s) => playbackFor(s, localAudio).kind === 'spotify').length;
+  const players = config.partyPlayers ?? [];
+  const partyOn = config.partyPlayers !== undefined;
+  const setPlayers = (list: string[] | undefined) => setSetupConfig({ ...config, partyPlayers: list });
   const isDuel = config.format === 'duel';
   const extrasPossible = !isDuel && config.evaluation !== 'select';
 
@@ -48,7 +52,7 @@ export function Setup() {
       name: name.trim() || 'Music Cypher',
       createdAt: now,
       updatedAt: now,
-      config,
+      config: { ...config, partyPlayers: partyOn ? players.map((p) => p.trim()).filter(Boolean) : undefined },
       songs: frozen,
       seed,
       draw,
@@ -121,7 +125,7 @@ export function Setup() {
               key={p.id}
               className="preset"
               aria-pressed={config.presetId === p.id}
-              onClick={() => setSetupConfig({ ...p.config, avoidSameArtist: config.avoidSameArtist, drawMode: config.drawMode })}
+              onClick={() => setSetupConfig({ ...p.config, avoidSameArtist: config.avoidSameArtist, drawMode: config.drawMode, blindMode: config.blindMode, partyPlayers: config.partyPlayers })}
             >
               <span className="pname">
                 {config.presetId === p.id && <span aria-hidden="true">✓</span>}
@@ -293,6 +297,77 @@ export function Setup() {
           )}
         </div>
       </details>
+
+      <section className="card">
+        <h2>Spielmodus</h2>
+        <div className="grid-2">
+          <div className="stack" style={{ gap: 8 }}>
+            <label className="check">
+              <input type="checkbox" checked={!!config.blindMode} onChange={(e) => setSetupConfig({ ...config, blindMode: e.target.checked })} />
+              <span>
+                <strong>Blind-Modus</strong>
+                <span className="tiny muted">Titel, Interpret und Cover bleiben verdeckt, bis du entschieden hast. Nur der Klang zählt.</span>
+              </span>
+            </label>
+            {config.blindMode && spotifyOnly > 0 && (
+              <div className="notice warn small">
+                {spotifyOnly} Songs laufen über den Spotify-Player – der zeigt Titel und Cover selbst an. Wirklich blind
+                funktioniert es mit eigenen Audiodateien und den Demo-Songs.
+              </div>
+            )}
+          </div>
+          <div className="stack" style={{ gap: 8 }}>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={partyOn}
+                onChange={(e) => setPlayers(e.target.checked ? (players.length ? players : ['', '']) : undefined)}
+              />
+              <span>
+                <strong>Partymodus</strong>
+                <span className="tiny muted">Mehrere stimmen nacheinander am selben Gerät ab, die Gruppe entscheidet.</span>
+              </span>
+            </label>
+            {partyOn && (
+              <div className="stack" style={{ gap: 6 }}>
+                {players.map((p, i) => (
+                  <div className="row" key={i} style={{ gap: 6, flexWrap: 'nowrap' }}>
+                    <input
+                      type="text"
+                      value={p}
+                      placeholder={`Name ${i + 1}`}
+                      aria-label={`Name Person ${i + 1}`}
+                      maxLength={24}
+                      onChange={(e) => setPlayers(players.map((x, j) => (j === i ? e.target.value : x)))}
+                    />
+                    <button
+                      className="btn icon small ghost"
+                      onClick={() => setPlayers(players.filter((_, j) => j !== i))}
+                      disabled={players.length <= 2}
+                      aria-label={`Person ${i + 1} entfernen`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {players.length < 8 && (
+                  <button className="btn small" onClick={() => setPlayers([...players, ''])}>
+                    + Person
+                  </button>
+                )}
+                <span className="tiny muted">
+                  {config.format === 'duel' || config.evaluation === 'select'
+                    ? 'Jede Person wählt – die meisten Stimmen gewinnen.'
+                    : config.evaluation === 'rank'
+                      ? 'Jede Person sortiert – Platzpunkte werden addiert.'
+                      : 'Jede Person vergibt Punkte – der Durchschnitt zählt.'}{' '}
+                  Bei Gleichstand an der Grenze entscheidet ihr gemeinsam.
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
 
       <section className="card">
         <h2>So läuft dein Turnier ab</h2>

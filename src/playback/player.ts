@@ -19,6 +19,8 @@ export interface PlayerState {
   mode: 'snippet' | 'full';
   snippetStart: number;
   error: string | null;
+  /** Blind mode: display labels per song ID instead of the real title. */
+  mask: Record<string, string> | null;
 }
 
 let prefs: Prefs = typeof localStorage !== 'undefined' ? loadPrefs() : { volume: 0.8, playMode: 'snippet', snippetStart: {} };
@@ -33,6 +35,7 @@ let state: PlayerState = {
   mode: prefs.playMode,
   snippetStart: 0,
   error: null,
+  mask: null,
 };
 
 const listeners = new Set<() => void>();
@@ -81,6 +84,9 @@ export const player = {
     return () => listeners.delete(l);
   },
   get: () => state,
+  setMask(mask: Record<string, string> | null) {
+    set({ mask });
+  },
   setLocalAudioIds(ids: ReadonlySet<string>) {
     localIds = ids;
   },

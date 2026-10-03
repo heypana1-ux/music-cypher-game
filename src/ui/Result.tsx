@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { describeConfig } from '../domain/config';
 import { computeState } from '../domain/engine';
-import { eliminationGroups, resultExport, songLine, songPath } from '../domain/results';
+import { eliminationGroups, resultExport, resultOrder, songLine, songPath } from '../domain/results';
 import { mergeSongs } from '../library/importers';
 import { backupFile, download, safeFileName } from '../storage/storage';
 import { artistsOf, Cover, PlayButton } from './common';
 import { groupName } from './Play';
+import { ShareImageModal, SpotifyExportModal } from './ShareTools';
 import { TournamentStatsView } from './Stats';
 
 function Confetti() {
@@ -33,6 +34,7 @@ export function Result({ id }: { id: string }) {
   const { tournaments, go, updateLibrary, setSetupConfig, toast } = useStore();
   const t = tournaments.find((x) => x.id === id);
   const state = useMemo(() => (t ? computeState(t) : null), [t]);
+  const [modal, setModal] = useState<'spotify' | 'image' | null>(null);
 
   if (!t || !state) {
     return (
@@ -106,8 +108,14 @@ export function Result({ id }: { id: string }) {
         </div>
         <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
           <PlayButton song={champ} />
-          <button className="btn" onClick={share}>
-            Teilen
+          <button className="btn" onClick={() => setModal('image')}>
+            Als Bild teilen
+          </button>
+          <button className="btn" onClick={() => setModal('spotify')}>
+            Nach Spotify
+          </button>
+          <button className="btn ghost" onClick={share}>
+            Text teilen
           </button>
         </div>
         <p className="tiny faint" style={{ marginTop: 16, marginBottom: 0 }}>
@@ -237,6 +245,15 @@ export function Result({ id }: { id: string }) {
           </button>
         </div>
       </section>
+      {modal === 'spotify' && (
+        <SpotifyExportModal
+          title="Ergebnis nach Spotify"
+          songs={resultOrder(state).map((r) => songs.get(r.songId)!)}
+          fileBase={t.name}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === 'image' && <ShareImageModal t={t} state={state} onClose={() => setModal(null)} />}
     </div>
   );
 }

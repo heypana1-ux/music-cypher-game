@@ -46,7 +46,19 @@ export interface TournamentConfig {
   thirdPlaceMatch: boolean;
   /** Rank mode: show 4/3/2/1 rank points (display only). */
   showRankPoints: boolean;
+  /** Hide title, artist and cover until a match is decided. */
+  blindMode?: boolean;
+  /** Party mode: names of everyone voting on this device (2–8). Empty/undefined = solo. */
+  partyPlayers?: string[];
   presetId?: string;
+}
+
+/** One person's vote in party mode. Stored with the decision for statistics. */
+export interface PartyVote {
+  player: string;
+  selected?: string[];
+  order?: string[];
+  scores?: Record<string, number>;
 }
 
 /** A confirmed decision. The tournament state is fully derived by replaying these. */
@@ -65,6 +77,8 @@ export interface Decision {
   scores?: Record<string, number>;
   /** Score mode: tie clusters the user explicitly ordered (each as a set of song IDs). */
   resolvedTies?: string[][];
+  /** Party mode: the individual votes the result was aggregated from. */
+  votes?: PartyVote[];
 }
 
 export interface Tournament {

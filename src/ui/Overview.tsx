@@ -71,7 +71,7 @@ export function Overview({ id }: { id: string }) {
               {r.matches
                 .filter((m) => m.kind !== 'bye')
                 .map((m) => (
-                  <MatchBox key={m.id} round={r} match={m} songs={songs} onReopen={setReopenId} />
+                  <MatchBox key={m.id} round={r} match={m} songs={songs} onReopen={setReopenId} blind={!!t.config.blindMode} />
                 ))}
             </div>
           ))}
@@ -113,7 +113,7 @@ export function Overview({ id }: { id: string }) {
                 {round.matches
                   .filter((m) => !(round.isPrelim && m.kind === 'bye'))
                   .map((m) => (
-                    <MatchBox key={m.id} round={round} match={m} songs={songs} onReopen={setReopenId} />
+                    <MatchBox key={m.id} round={round} match={m} songs={songs} onReopen={setReopenId} blind={!!t.config.blindMode} />
                   ))}
                 {round.playoffs.map((p) => (
                   <PlayoffBox key={p.id} round={round} playoff={p} songs={songs} onReopen={setReopenId} />
@@ -182,12 +182,15 @@ function MatchBox({
   match,
   songs,
   onReopen,
+  blind = false,
 }: {
   round: RoundState;
   match: MatchState;
   songs: Map<string, Song>;
   onReopen: (id: string) => void;
+  blind?: boolean;
 }) {
+  const hide = blind && match.status === 'open';
   const extraWinners = new Set(round.playoffs.flatMap((p) => p.winners));
   const order = match.outcome?.order ?? match.songIds;
   const scores = match.decision?.scores;
@@ -223,7 +226,7 @@ function MatchBox({
               {status === 'q' ? '✓' : status === 'e' ? '◆' : status === 'x' ? '✕' : '○'}
             </span>
             {match.outcome?.order && match.status === 'done' && <span className="tiny faint">{i + 1}.</span>}
-            <span className="nm">{s?.title ?? id}</span>
+            <span className="nm">{hide ? `Verdeckter Song ${i + 1}` : (s?.title ?? id)}</span>
             {scores && <span className="tiny muted">{scores[id]} P.</span>}
           </div>
         );

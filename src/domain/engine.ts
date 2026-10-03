@@ -301,7 +301,8 @@ export function evaluateMatch(
   const scores = d.scores ?? {};
   for (const id of ids) {
     const v = scores[id];
-    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 10) {
+    // Party mode stores averages (e.g. 7.33), so decimals are allowed within 1–10.
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 1 || v > 10) {
       return 'Jeder Song braucht eine Bewertung von 1 bis 10.';
     }
   }

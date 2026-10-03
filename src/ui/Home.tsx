@@ -6,6 +6,7 @@ import { demoSongs } from '../library/demo';
 import { mergeSongs } from '../library/importers';
 import { parseBackup } from '../storage/storage';
 import { fmtDate, Modal } from './common';
+import { useInstall } from './install';
 import { useStore } from './store';
 
 export function Home() {
@@ -56,6 +57,8 @@ export function Home() {
           Gewinner. Keine Algorithmen, nur dein Geschmack.
         </p>
       </section>
+
+      <InstallBanner />
 
       <div className="home-actions">
         <button className="action-tile primary" onClick={() => go({ page: 'library' })}>
@@ -181,5 +184,46 @@ export function Home() {
         </Modal>
       )}
     </div>
+  );
+}
+
+function InstallBanner() {
+  const inst = useInstall();
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem('mc.installDismissed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  if (hidden || inst.standalone || (!inst.canPrompt && !inst.ios)) return null;
+  const dismiss = () => {
+    setHidden(true);
+    try {
+      localStorage.setItem('mc.installDismissed', '1');
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <section className="card soft install-banner">
+      <img src="./icons/icon-192.png" alt="" width={48} height={48} style={{ borderRadius: 12 }} />
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <strong>Music Cypher als App</strong>
+        <div className="small muted">
+          {inst.canPrompt
+            ? 'Auf den Homescreen legen – startet im Vollbild und funktioniert auch offline.'
+            : 'Im Safari unten auf „Teilen“ (□↑) tippen und „Zum Home-Bildschirm“ wählen.'}
+        </div>
+      </div>
+      {inst.canPrompt && (
+        <button className="btn primary" onClick={() => void inst.install()}>
+          Installieren
+        </button>
+      )}
+      <button className="btn small ghost" onClick={dismiss}>
+        Nicht jetzt
+      </button>
+    </section>
   );
 }

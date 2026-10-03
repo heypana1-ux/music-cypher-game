@@ -2,6 +2,7 @@
 // so the numbers always match what the tournament actually decided.
 
 import { computeState } from './engine';
+import { agreement } from './party';
 import type { Song, Tournament, TournamentState } from './types';
 
 export interface SongRun {
@@ -227,6 +228,8 @@ export interface TournamentStats {
   artists: ArtistLine[];
   songsTable: SongLine[];
   runs: SongRun[];
+  /** Party mode: how often each voter agreed with the group result. */
+  party: Array<{ player: string; votes: number; agreement: number | null }> | null;
 }
 
 export function tournamentStats(t: Tournament, state: TournamentState = computeState(t)): TournamentStats {
@@ -265,7 +268,7 @@ export function tournamentStats(t: Tournament, state: TournamentState = computeS
     }
     for (const p of round.playoffs) if (p.decision && p.scores) tiesDecided++;
   }
-  const hist = all.length ? Array.from({ length: 10 }, (_, i) => all.filter((x) => x.v === i + 1).length) : null;
+  const hist = all.length ? Array.from({ length: 10 }, (_, i) => all.filter((x) => Math.round(x.v) === i + 1).length) : null;
 
   const songsTable: SongLine[] = runs.map((r) => ({
     song: byId.get(r.songId)!,
@@ -281,7 +284,33 @@ export function tournamentStats(t: Tournament, state: TournamentState = computeS
     stage: r.stage,
   }));
 
+  // party
+  let party: TournamentStats['party'] = null;
+  if (t.config.partyPlayers && t.config.partyPlayers.length > 1) {
+    const acc = new Map<string, { votes: number; sum: number; n: number }>();
+    for (const p of t.config.partyPlayers) acc.set(p, { votes: 0, sum: 0, n: 0 });
+    for (const round of state.rounds) {
+      const items: Array<{ votes?: import('./types').PartyVote[]; qualified: string[]; k: number }> = [];
+      for (const m of round.matches) if (m.decision?.votes && m.outcome) items.push({ votes: m.decision.votes, qualified: m.outcome.qualified, k: m.advanceCount });
+      for (const p of round.playoffs) if (p.decision?.votes) items.push({ votes: p.decision.votes, qualified: p.winners, k: p.contestedSpots });
+      for (const it of items) {
+        for (const v of it.votes ?? []) {
+          const a = acc.get(v.player) ?? { votes: 0, sum: 0, n: 0 };
+          a.votes++;
+          const ag = agreement(v, it.qualified, it.k);
+          if (ag !== null) {
+            a.sum += ag;
+            a.n++;
+          }
+          acc.set(v.player, a);
+        }
+      }
+    }
+    party = [...acc.entries()].map(([player, a]) => ({ player, votes: a.votes, agreement: a.n ? a.sum / a.n : null }));
+  }
+
   return {
+    party,
     songs: n,
     rounds: state.rounds.length,
     decisions: state.validDecisions.length,

@@ -8,7 +8,9 @@ import {
   type SongLine,
   type TournamentStats,
 } from '../domain/stats';
+import { computeRatings, START_RATING, type SongRating } from '../domain/rating';
 import type { Tournament } from '../domain/types';
+import { SpotifyExportModal } from './ShareTools';
 import { artistsOf, Cover, fmtDate } from './common';
 import { useStore } from './store';
 
@@ -263,6 +265,28 @@ export function TournamentStatsView({ t, compact = false }: { t: Tournament; com
         )}
       </div>
 
+      {st.party && (
+        <section className="card">
+          <h3>Partymodus: Wer liegt am häufigsten mit der Gruppe?</h3>
+          <BarList
+            max={1}
+            rows={st.party
+              .slice()
+              .sort((a, b) => (b.agreement ?? -1) - (a.agreement ?? -1))
+              .map((p) => ({
+                key: p.player,
+                label: p.player,
+                sub: `${p.votes} ${p.votes === 1 ? 'Stimme' : 'Stimmen'}`,
+                value: p.agreement ?? 0,
+                display: pct(p.agreement),
+              }))}
+          />
+          <p className="tiny muted" style={{ marginBottom: 0 }}>
+            Anteil der eigenen Favoriten, die am Ende auch per Gruppenentscheid weiterkamen.
+          </p>
+        </section>
+      )}
+
       {(st.closeCalls.length > 0 || st.topScores.length > 0) && (
         <div className="grid-2">
           {st.topScores.length > 0 && (
@@ -326,6 +350,8 @@ export function StatsPage({ id }: { id?: string }) {
   const o = useMemo(() => overallStats(tournaments), [tournaments]);
   const [metric, setMetric] = useState<Metric>('winRate');
   const [minEnc, setMinEnc] = useState(3);
+  const ratings = useMemo(() => computeRatings(tournaments), [tournaments]);
+  const [exportRatings, setExportRatings] = useState(false);
 
   const artistRows = useMemo(() => {
     const list = o.artists.filter((a) => (metric === 'winRate' || metric === 'avgProgress' ? a.encounters >= minEnc : true));
@@ -438,6 +464,17 @@ export function StatsPage({ id }: { id?: string }) {
             )}
           </section>
 
+          <RatingSection ratings={ratings} onExport={() => setExportRatings(true)} />
+          {exportRatings && (
+            <SpotifyExportModal
+              title="Gesamt-Rating nach Spotify"
+              songs={ratings.map((r) => r.song)}
+              fileBase="music-cypher-rating"
+              counts={[10, 25, 50]}
+              onClose={() => setExportRatings(false)}
+            />
+          )}
+
           <section className="card">
             <div className="section-title">
               <h3 style={{ margin: 0 }}>Interpreten-Ranking</h3>
@@ -522,4 +559,74 @@ export function StatsPage({ id }: { id?: string }) {
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Overall rating
+
+function RatingSection({ ratings, onExport }: { ratings: SongRating[]; onExport: () => void }) {
+  if (!ratings.length) return null;
+  const top = ratings.slice(0, 10);
+  const min = Math.min(...ratings.map((r) => r.rating));
+  const cols: Col<SongRating>[] = [
+    { key: 'rank', label: '#', value: (r) => ratings.indexOf(r) + 1, num: true },
+    {
+      key: 'title',
+      label: 'Song',
+      value: (r) => r.song.title,
+      render: (r) => (
+        <span className="cell-song">
+          <Cover song={r.song} size={28} />
+          <span>
+            <strong>{r.song.title}</strong>
+            <span className="tiny muted"> {artistsOf(r.song)}</span>
+          </span>
+        </span>
+      ),
+    },
+    { key: 'rating', label: 'Rating', value: (r) => r.rating, render: (r) => Math.round(r.rating), num: true },
+    { key: 'peak', label: 'Bestwert', value: (r) => r.peak, render: (r) => Math.round(r.peak), num: true },
+    { key: 'last', label: 'Zuletzt', value: (r) => r.lastChange, render: (r) => <Delta d={r.lastChange} />, num: true },
+    { key: 'comparisons', label: 'Vergleiche', value: (r) => r.comparisons, num: true },
+    { key: 'record', label: 'S / U / N', value: (r) => r.wins - r.losses, render: (r) => `${r.wins} / ${r.draws} / ${r.losses}`, num: true },
+    { key: 'tournaments', label: 'Turniere', value: (r) => r.tournaments, num: true },
+  ];
+  return (
+    <section className="card">
+      <div className="section-title">
+        <h3 style={{ margin: 0 }}>Gesamt-Rating</h3>
+        <span className="chip violet">alle Turniere</span>
+        <span className="spacer" />
+        <button className="btn small" onClick={onExport}>
+          Nach Spotify
+        </button>
+      </div>
+      <p className="tiny muted">
+        Wie beim Schach (Elo): Jeder Song startet mit {START_RATING}. Gewinnt er in einer Begegnung gegen einen anderen, steigt
+        er – gegen starke Gegner mehr, gegen schwache weniger. So entsteht über alle Turniere deine persönliche Bestenliste,
+        auch für Songs, die nie ein Turnier gewonnen haben.
+      </p>
+      <BarList
+        rows={top.map((r, i) => ({
+          key: r.song.id,
+          label: `${i + 1}. ${r.song.title}`,
+          sub: `${artistsOf(r.song)} · ${r.comparisons} Vergleiche`,
+          value: r.rating - min + 20,
+          display: `${Math.round(r.rating)}`,
+        }))}
+      />
+      <details style={{ marginTop: 12 }}>
+        <summary className="small">Komplette Rating-Tabelle ({ratings.length} Songs)</summary>
+        <div style={{ marginTop: 10 }}>
+          <SortTable rows={ratings} cols={cols} initial="rating" rowKey={(r) => r.song.id} />
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function Delta({ d }: { d: number }) {
+  const v = Math.round(d);
+  if (!v) return <span className="faint">±0</span>;
+  return <span style={{ color: v > 0 ? 'var(--accent)' : 'var(--danger)' }}>{v > 0 ? `▲ +${v}` : `▼ ${v}`}</span>;
 }

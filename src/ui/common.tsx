@@ -72,7 +72,7 @@ export function PlaybackChip({ song }: { song: Song }) {
   return <span className={cls}>{info.kind === 'none' ? '⊘ ' : '♪ '}{info.label}</span>;
 }
 
-export function PlayButton({ song, compact = false }: { song: Song; compact?: boolean }) {
+export function PlayButton({ song, compact = false, label: name }: { song: Song; compact?: boolean; label?: string }) {
   const p = usePlayer();
   const { localAudio } = useStore();
   const info = playbackFor(song, localAudio);
@@ -91,7 +91,7 @@ export function PlayButton({ song, compact = false }: { song: Song; compact?: bo
       className={`btn ${compact ? 'small' : ''}`}
       onClick={() => player.toggle(song)}
       aria-pressed={active}
-      aria-label={`${label}: ${song.title}`}
+      aria-label={`${label}: ${name ?? song.title}`}
     >
       <span aria-hidden="true">{playing && info.kind !== 'spotify' ? '❚❚' : '▶'}</span> {label}
     </button>
@@ -116,14 +116,15 @@ export function PlayerDock() {
   }, [hasSong]);
   if (!p.song) return null;
   const s = p.song;
+  const masked = p.mask?.[s.id];
   const snippetEnd = p.snippetStart + SNIPPET_SECONDS;
   return (
     <div className={`dock ${p.kind === 'spotify' ? 'is-embed' : ''}`} ref={ref} role="region" aria-label="Wiedergabe">
       <div className="dock-inner">
-        <Cover song={s} size={48} />
+        {masked ? <div className="cover blind-cover" style={{ width: 48, height: 48 }} aria-hidden="true" /> : <Cover song={s} size={48} />}
         <div className="meta">
-          <div className="title">{s.title}</div>
-          <div className="small muted">{artistsOf(s)}</div>
+          <div className="title">{masked ?? s.title}</div>
+          <div className="small muted">{masked ? 'verdeckt' : artistsOf(s)}</div>
         </div>
         {p.kind === 'spotify' && s.spotifyTrackId ? (
           <iframe
