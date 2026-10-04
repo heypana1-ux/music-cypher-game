@@ -125,6 +125,11 @@ export function Home() {
                   <button className="btn primary small" onClick={() => go({ page: 'play', id: t.id })}>
                     Fortsetzen
                   </button>
+                  {!(t.config.partyPlayers && t.config.partyPlayers.length >= 2) && (
+                    <button className="btn small" onClick={() => go({ page: 'car', id: t.id })}>
+                      🚗 Im Auto
+                    </button>
+                  )}
                   <button className="btn small ghost" onClick={() => go({ page: 'overview', id: t.id })}>
                     Übersicht
                   </button>

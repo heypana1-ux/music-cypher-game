@@ -4,6 +4,7 @@ import { Library } from './Library';
 import { Overview } from './Overview';
 import { Play } from './Play';
 import { Result } from './Result';
+import { CarMode } from './CarMode';
 import { Setup } from './Setup';
 import { StatsPage } from './Stats';
 import { StoreProvider, useStore } from './store';
@@ -12,6 +13,18 @@ function Shell() {
   const { route, go, toastMsg, saveError, tournaments } = useStore();
   const tid = route.page !== 'stats' && 'id' in route ? route.id : null;
   const hasTournament = tid && tournaments.some((t) => t.id === tid);
+  if (route.page === 'car') {
+    return (
+      <>
+        <CarMode id={route.id} />
+        {toastMsg && (
+          <div className="toast" role="status">
+            {toastMsg}
+          </div>
+        )}
+      </>
+    );
+  }
   return (
     <>
       <header className="topbar">

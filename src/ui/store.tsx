@@ -19,6 +19,7 @@ export type Route =
   | { page: 'library' }
   | { page: 'setup' }
   | { page: 'play'; id: string }
+  | { page: 'car'; id: string }
   | { page: 'overview'; id: string }
   | { page: 'result'; id: string }
   | { page: 'stats'; id?: string };
@@ -31,6 +32,7 @@ export function parseHash(hash: string): Route {
   if (parts[0] === 'turnier' && parts[1]) {
     if (parts[2] === 'uebersicht') return { page: 'overview', id: parts[1] };
     if (parts[2] === 'ergebnis') return { page: 'result', id: parts[1] };
+    if (parts[2] === 'auto') return { page: 'car', id: parts[1] };
     return { page: 'play', id: parts[1] };
   }
   return { page: 'home' };
@@ -50,6 +52,8 @@ export function routeHash(r: Route): string {
       return `#/turnier/${encodeURIComponent(r.id)}/uebersicht`;
     case 'result':
       return `#/turnier/${encodeURIComponent(r.id)}/ergebnis`;
+    case 'car':
+      return `#/turnier/${encodeURIComponent(r.id)}/auto`;
     case 'stats':
       return r.id ? `#/statistik/${encodeURIComponent(r.id)}` : '#/statistik';
   }
