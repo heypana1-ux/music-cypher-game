@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { participantMap } from '../domain/participants';
 import { computeState } from '../domain/engine';
 import {
   overallStats,
@@ -198,7 +199,7 @@ function songCols(overall: boolean): Col<SongLine>[] {
 export function TournamentStatsView({ t, compact = false }: { t: Tournament; compact?: boolean }) {
   const state = useMemo(() => computeState(t), [t]);
   const st: TournamentStats = useMemo(() => tournamentStats(t, state), [t, state]);
-  const byId = new Map(t.songs.map((s) => [s.id, s]));
+  const byId = participantMap(t);
   const title = (id: string) => byId.get(id)?.title ?? id;
   const topArtists = st.artists
     .filter((a) => a.songs >= 1)
@@ -409,7 +410,7 @@ export function StatsPage({ id }: { id?: string }) {
           <div className="row">
             <h2 style={{ margin: 0 }}>{selected.name}</h2>
             <span className="muted small">
-              {selected.songs.length} Songs · gestartet {fmtDate(selected.createdAt)}
+              {selected.draw.length} {selected.artistMode ? 'Künstler' : 'Songs'} · gestartet {fmtDate(selected.createdAt)}
             </span>
             <span className="spacer" />
             <button className="btn small" onClick={() => go({ page: 'overview', id: selected.id })}>
@@ -453,7 +454,7 @@ export function StatsPage({ id }: { id?: string }) {
                         <strong>{c.song.title}</strong>
                         <span className="small muted">{artistsOf(c.song)}</span>
                         <span className="tiny faint">
-                          {c.tournament.name} · {c.tournament.songs.length} Songs · {fmtDate(c.date)}
+                          {c.tournament.name} · {c.tournament.draw.length} {c.tournament.artistMode ? 'Künstler' : 'Songs'} · {fmtDate(c.date)}
                         </span>
                       </span>
                       <span aria-hidden="true">🏆</span>

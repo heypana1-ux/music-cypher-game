@@ -6,7 +6,10 @@ import { mergeSongs } from '../library/importers';
 import { backupFile, download, safeFileName } from '../storage/storage';
 import { artistsOf, Cover, PlayButton } from './common';
 import { groupName } from './Play';
-import { ShareImageModal, SpotifyExportModal } from './ShareTools';
+import { participantMap, roundEntries, songInRound } from '../domain/participants';
+import { songRuns } from '../domain/stats';
+import type { Song } from '../domain/types';
+import { BracketImageModal, ShareImageModal, SpotifyExportModal } from './ShareTools';
 import { TournamentStatsView } from './Stats';
 
 function Confetti() {
@@ -34,7 +37,7 @@ export function Result({ id }: { id: string }) {
   const { tournaments, go, updateLibrary, setSetupConfig, toast } = useStore();
   const t = tournaments.find((x) => x.id === id);
   const state = useMemo(() => (t ? computeState(t) : null), [t]);
-  const [modal, setModal] = useState<'spotify' | 'image' | null>(null);
+  const [modal, setModal] = useState<'spotify' | 'image' | 'bracket' | null>(null);
 
   if (!t || !state) {
     return (
@@ -46,7 +49,8 @@ export function Result({ id }: { id: string }) {
       </div>
     );
   }
-  const songs = new Map(t.songs.map((s) => [s.id, s]));
+  const songs = participantMap(t);
+  const unit = t.artistMode ? 'Künstler' : 'Songs';
   if (!state.finished) {
     return (
       <div className="card">
@@ -65,12 +69,24 @@ export function Result({ id }: { id: string }) {
   const finalists = fin ? fin.songIds.filter((x) => x !== champ.id) : [];
   const finalOrder = fin?.outcome?.order;
   const groups = eliminationGroups(state);
+  // Artist cypher: the songs the champion brought, one per round
+  const champSongs: Song[] = t.artistMode ? path.map((st) => songInRound(t, champ.id, st.round.index)!).filter(Boolean) : [];
+  const champPlayable = t.artistMode ? roundEntries(t, finalRound.index).get(champ.id) ?? champ : champ;
+  // export: in an artist cypher every song that was actually played, in result order
+  const exportSongs = (): Song[] => {
+    const order = resultOrder(state).map((r) => r.songId);
+    if (!t.artistMode) return order.map((id) => songs.get(id)!);
+    const runs = new Map(songRuns(t, state).map((r) => [r.songId, r]));
+    return order.flatMap((pid) =>
+      Array.from({ length: (runs.get(pid)?.lastRound ?? 0) + 1 }, (_, ri) => songInRound(t, pid, ri)).filter((x): x is Song => !!x),
+    );
+  };
 
   const share = async () => {
     const lines = [
       `🏆 Mein Music-Cypher-Gewinner: ${songLine(champ)}`,
       state.runnerUp ? `🥈 Finale: ${songLine(songs.get(state.runnerUp))}` : '',
-      `${t.name} · ${t.songs.length} Songs`,
+      `${t.name} · ${t.draw.length} ${unit}`,
       champ.spotifyTrackId ? `https://open.spotify.com/track/${champ.spotifyTrackId}` : '',
     ].filter(Boolean);
     const text = lines.join('\n');
@@ -100,16 +116,25 @@ export function Result({ id }: { id: string }) {
       <section className="winner">
         <Confetti />
         <Cover song={champ} size={200} />
-        <div className="crown">Dein Gewinner</div>
+        <div className="crown">{t.artistMode ? 'Dein Künstler-Champion' : 'Dein Gewinner'}</div>
         <h1>{champ.title}</h1>
-        <div className="muted" style={{ fontSize: '1.1rem' }}>
-          {artistsOf(champ)}
-          {champ.album ? ` · ${champ.album}` : ''}
-        </div>
+        {t.artistMode ? (
+          <div className="muted" style={{ fontSize: '1rem' }}>
+            mit {champSongs.map((s) => `„${s.title}“`).join(' · ')}
+          </div>
+        ) : (
+          <div className="muted" style={{ fontSize: '1.1rem' }}>
+            {artistsOf(champ)}
+            {champ.album ? ` · ${champ.album}` : ''}
+          </div>
+        )}
         <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
-          <PlayButton song={champ} />
+          <PlayButton song={champPlayable} />
           <button className="btn" onClick={() => setModal('image')}>
             Als Bild teilen
+          </button>
+          <button className="btn" onClick={() => setModal('bracket')}>
+            Turnierbaum als Bild
           </button>
           <button className="btn" onClick={() => setModal('spotify')}>
             Nach Spotify
@@ -119,7 +144,7 @@ export function Result({ id }: { id: string }) {
           </button>
         </div>
         <p className="tiny faint" style={{ marginTop: 16, marginBottom: 0 }}>
-          {t.name} · {t.songs.length} Songs · Ergebnis deiner persönlichen Entscheidungen
+          {t.name} · {t.draw.length} {unit} · Ergebnis deiner persönlichen Entscheidungen
         </p>
       </section>
 
@@ -170,10 +195,17 @@ export function Result({ id }: { id: string }) {
                 <li key={m.id}>
                   <strong>{step.round.label}</strong>
                   {m.kind === 'cypher' || m.kind === 'special' ? <span className="muted small"> · {groupName(step.round, m.id)}</span> : null}
+                  {t.artistMode && (
+                    <div className="small">
+                      🎵 <strong>{songInRound(t, champ.id, step.round.index)?.title}</strong>
+                    </div>
+                  )}
                   <div className="small">
                     {step.via === 'bye'
                       ? 'Freilos – automatisch weiter'
-                      : `gegen ${opp.map((o) => songs.get(o)?.title).join(', ')}`}
+                      : `gegen ${opp
+                          .map((o) => (t.artistMode ? `${songs.get(o)?.title} („${songInRound(t, o, step.round.index)?.title}“)` : songs.get(o)?.title))
+                          .join(', ')}`}
                   </div>
                   <div className="tiny muted">
                     {step.via === 'extra' && 'Über den Zusatzplatz weiter. '}
@@ -248,12 +280,13 @@ export function Result({ id }: { id: string }) {
       {modal === 'spotify' && (
         <SpotifyExportModal
           title="Ergebnis nach Spotify"
-          songs={resultOrder(state).map((r) => songs.get(r.songId)!)}
+          songs={exportSongs()}
           fileBase={t.name}
           onClose={() => setModal(null)}
         />
       )}
       {modal === 'image' && <ShareImageModal t={t} state={state} onClose={() => setModal(null)} />}
+      {modal === 'bracket' && <BracketImageModal t={t} state={state} onClose={() => setModal(null)} />}
     </div>
   );
 }

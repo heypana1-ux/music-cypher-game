@@ -2,6 +2,7 @@
 // so the numbers always match what the tournament actually decided.
 
 import { computeState } from './engine';
+import { participantMap, participants } from './participants';
 import { agreement } from './party';
 import type { Song, Tournament, TournamentState } from './types';
 
@@ -33,7 +34,7 @@ export function artistKey(name: string): string {
 /** One SongRun per participant of a tournament. */
 export function songRuns(t: Tournament, state: TournamentState = computeState(t)): SongRun[] {
   const runs = new Map<string, SongRun>();
-  for (const s of t.songs) {
+  for (const s of participants(t)) {
     runs.set(s.id, {
       songId: s.id,
       tournamentId: t.id,
@@ -139,7 +140,7 @@ function stageRank(stage: string): number {
 function aggregateArtists(entries: Array<{ t: Tournament; runs: SongRun[]; finished: boolean }>): ArtistLine[] {
   const map = new Map<string, ArtistLine & { _progress: number[]; _scores: number[]; _t: Set<string>; _bestLast: number }>();
   for (const { t, runs, finished } of entries) {
-    const byId = new Map(t.songs.map((s) => [s.id, s]));
+    const byId = participantMap(t);
     for (const r of runs) {
       const song = byId.get(r.songId);
       const names = song && song.artists.length ? song.artists : ['Unbekannter Interpret'];
@@ -234,9 +235,9 @@ export interface TournamentStats {
 
 export function tournamentStats(t: Tournament, state: TournamentState = computeState(t)): TournamentStats {
   const runs = songRuns(t, state);
-  const byId = new Map(t.songs.map((s) => [s.id, s]));
+  const byId = participantMap(t);
   const alive = state.finished ? 0 : runs.filter((r) => r.alive).length;
-  const n = t.songs.length;
+  const n = t.draw.length;
   const progress = state.finished ? 1 : n > 1 ? (n - Math.max(alive, 1)) / (n - 1) : 0;
 
   // time
@@ -362,8 +363,9 @@ export function overallStats(tournaments: Tournament[]): OverallStats {
   });
   const songAgg = new Map<string, SongLine & { _progress: number[]; _scores: number[]; _best: number }>();
   for (const { t, runs, finished } of entries) {
-    const byId = new Map(t.songs.map((s) => [s.id, s]));
+    const byId = participantMap(t);
     for (const r of runs) {
+      if (r.songId.startsWith('ar:')) continue; // artist cyphers count for artists, not as songs
       let s = songAgg.get(r.songId);
       if (!s) {
         s = {
@@ -409,7 +411,7 @@ export function overallStats(tournaments: Tournament[]): OverallStats {
     .filter((e) => e.state.champion)
     .map((e) => ({
       tournament: e.t,
-      song: e.t.songs.find((s) => s.id === e.state.champion)!,
+      song: participantMap(e.t).get(e.state.champion!)!,
       date: e.t.updatedAt,
     }))
     .sort((a, b) => b.date.localeCompare(a.date));

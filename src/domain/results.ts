@@ -1,4 +1,5 @@
 import type { MatchState, PlayoffState, RoundState, Song, Tournament, TournamentState } from './types';
+import { participantMap } from './participants';
 
 export interface PathStep {
   round: RoundState;
@@ -69,7 +70,7 @@ export function songLine(s: Song | undefined): string {
 
 /** A readable export of the result (no credentials, no audio). */
 export function resultExport(t: Tournament, state: TournamentState) {
-  const byId = new Map(t.songs.map((s) => [s.id, s]));
+  const byId = participantMap(t);
   const brief = (id: string | null) => {
     const s = id ? byId.get(id) : undefined;
     return s ? { id: s.id, title: s.title, artists: s.artists, album: s.album ?? null } : null;

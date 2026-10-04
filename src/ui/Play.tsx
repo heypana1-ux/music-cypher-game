@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { addDecision, computeState, findMatch, findPlayoff, relevantTies, undoLast } from '../domain/engine';
+import { addDecision, computeState, findMatch, findPlayoff, relevantTies, roundOfTarget, undoLast } from '../domain/engine';
+import { roundEntries, unitize } from '../domain/participants';
 import { newId } from '../domain/rng';
 import { aggregateVotes, applyTieOrder, type AggregateInput } from '../domain/party';
 import { computeRatings } from '../domain/rating';
@@ -19,6 +20,8 @@ interface Label {
   song: Song | undefined;
   hidden: boolean;
 }
+/** Hide earlier scores/places (blind mode or the "frühere Punkte ausblenden" option). */
+const HidePastCtx = createContext(false);
 const LabelCtx = createContext<(id: string) => Label>(() => ({ title: '', artists: '', song: undefined, hidden: false }));
 const useLabel = () => useContext(LabelCtx);
 
@@ -151,8 +154,8 @@ export function Play({ id }: { id: string }) {
     );
   }
 
-  const songs: SongMap = new Map(t.songs.map((s) => [s.id, s]));
   const round = state.rounds[state.rounds.length - 1];
+  const songs: SongMap = roundEntries(t, round.index);
   const realMatches = state.rounds.flatMap((r) => r.matches.filter((m) => m.kind !== 'bye'));
   const decidedTotal = realMatches.filter((m) => m.status === 'done').length;
   const roundReal = round.matches.filter((m) => m.kind !== 'bye');
@@ -201,7 +204,7 @@ export function Play({ id }: { id: string }) {
       <div style={{ flex: 1, minWidth: 220 }}>
         <div className="small muted">{t.name}</div>
         <h1 style={{ margin: '2px 0' }}>{round.label}</h1>
-        <div className="muted small">{round.sublabel}</div>
+        <div className="muted small">{unitize(round.sublabel, !!t.artistMode)}</div>
       </div>
       <div className="row">
         <button className="btn small ghost" onClick={() => go({ page: 'overview', id: t.id })}>
@@ -248,7 +251,7 @@ export function Play({ id }: { id: string }) {
     return (
       <div className="stack">
         {header}
-        <DecidedPanel state={state} targetId={justDecided} songs={songs} blind={!!t.config.blindMode} />
+        <DecidedPanel state={state} targetId={justDecided} songs={roundEntries(t, roundOfTarget(justDecided))} blind={!!t.config.blindMode} />
         <div className="row end">
           {state.finished ? (
             <button className="btn primary big" onClick={() => go({ page: 'result', id: t.id })} autoFocus>
@@ -285,6 +288,7 @@ export function Play({ id }: { id: string }) {
 
   return (
     <SongInfoCtx.Provider value={songInfo}>
+    <HidePastCtx.Provider value={!!(t.config.blindMode || t.config.hidePastScores)}>
     <LabelCtx.Provider value={realLabels(songs)}>
     <div className="stack">
       {header}
@@ -293,6 +297,12 @@ export function Play({ id }: { id: string }) {
           {round.notes.map((n) => (
             <div key={n}>{n}</div>
           ))}
+        </div>
+      )}
+      {t.artistMode && (
+        <div className="notice small">
+          🎤 <strong>Künstler-Cypher</strong> – in dieser Runde bringt jeder Künstler seinen {round.index + 1}. Song. Wer weiterkommt,
+          tritt nächste Runde mit einem neuen Song an.
         </div>
       )}
       {round.index === 0 && t.drawNotes.length > 0 && state.validDecisions.length === 0 && (
@@ -332,6 +342,7 @@ export function Play({ id }: { id: string }) {
       {undoModal}
     </div>
     </LabelCtx.Provider>
+    </HidePastCtx.Provider>
     </SongInfoCtx.Provider>
   );
 }
@@ -367,6 +378,7 @@ function SongCard({
 }) {
   const p = usePlayer();
   const label = useLabel()(song.id);
+  const hidePast = useContext(HidePastCtx);
   const info = useContext(SongInfoCtx)(song.id);
   const playing = p.song?.id === song.id;
   return (
@@ -387,7 +399,7 @@ function SongCard({
         <div className="st">{label.title}</div>
         <div className="sa">{label.hidden ? '🙈 verdeckt bis zur Entscheidung' : artistsOf(song)}</div>
         {!label.hidden && song.album && <div className="tiny faint">{song.album}</div>}
-        {!label.hidden && info}
+        {!label.hidden && !hidePast && info}
       </div>
       <div>
         <PlaybackChip song={song} />
@@ -852,8 +864,9 @@ function ScoreBoard({ match, list, onCommit, onPostpone, voter }: BoardProps & {
 function PlayoffBoard(props: BoardProps & { playoff: PlayoffState }) {
   const { playoff, t } = props;
   const players = t.config.partyPlayers ?? [];
-  if (players.length < 2) return <PlayoffVote {...props} />;
-  return (
+  const wrap = (node: ReactNode) => (t.config.blindMode ? <BlindProvider ids={playoff.contested}>{node}</BlindProvider> : node);
+  if (players.length < 2) return wrap(<PlayoffVote {...props} />);
+  return wrap(
     <PartyFlow
       players={players}
       input={{ songIds: playoff.contested, advanceCount: playoff.contestedSpots, evaluation: 'select', candidateRequired: false }}
@@ -878,6 +891,8 @@ function PlayoffBoard(props: BoardProps & { playoff: PlayoffState }) {
 }
 
 function PlayoffVote({ round, playoff, songs, onCommit, onPostpone, voter }: BoardProps & { playoff: PlayoffState }) {
+  const hidePast = useContext(HidePastCtx);
+  const showScores = playoff.scores && !hidePast;
   const [picked, setPicked] = useState<string[]>([]);
   const list = playoff.contested.map((id) => songs.get(id)!);
   useNumberKeys(list);
@@ -915,7 +930,9 @@ function PlayoffVote({ round, playoff, songs, onCommit, onPostpone, voter }: Boa
       </section>
       <p className="muted small" style={{ margin: 0 }}>
         {playoff.scores
-          ? `Gleichstand mit ${playoff.scores[playoff.contested[0]]} Punkten – du entscheidest im direkten Vergleich.`
+          ? hidePast
+            ? 'Gleichstand nach Punkten – du entscheidest im direkten Vergleich.'
+            : `Gleichstand mit ${playoff.scores[playoff.contested[0]]} Punkten – du entscheidest im direkten Vergleich.`
           : 'Ohne vergleichbare Punkte entscheidest du selbst.'}{' '}
         Wähle {need === 1 ? 'den Song' : `${need} Songs`}, der den Zusatzplatz bekommt.
       </p>
@@ -929,7 +946,7 @@ function PlayoffVote({ round, playoff, songs, onCommit, onPostpone, voter }: Boa
               index={i}
               picked={on}
               badge={on ? '✓ Zusatzplatz' : undefined}
-              rankBadge={`${groupOf(s.id)}${playoff.scores ? ` · ${playoff.scores[s.id]} P.` : ''}`}
+              rankBadge={`${groupOf(s.id)}${showScores ? ` · ${playoff.scores![s.id]} P.` : ''}`}
             >
               <button className="btn pick-btn" aria-pressed={on} onClick={() => toggle(s.id)} disabled={!on && need > 1 && picked.length >= need}>
                 {on ? '✓ Bekommt den Platz' : 'Diesen wählen'}

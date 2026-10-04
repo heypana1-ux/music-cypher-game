@@ -6,6 +6,7 @@
 // In a group of n songs each pairing uses K/(n−1), so a cypher moves ratings about as much as a duel.
 
 import { computeState } from './engine';
+import { songInRound } from './participants';
 import type { Song, Tournament } from './types';
 
 export const START_RATING = 1500;
@@ -41,6 +42,10 @@ function eventsOf(t: Tournament): Event[] {
   const events: Event[] = [];
   let seq = 0;
   for (const round of state.rounds) {
+    // In an artist cypher the participants are artists – rate the songs they actually played.
+    const real = (id: string) => (t.artistMode ? songInRound(t, id, round.index) : byId.get(id));
+    const realId = (id: string) => real(id)?.id ?? id;
+    const mapPairs = (ps: Array<[string, string, boolean]>) => ps.map(([a, b, d]) => [realId(a), realId(b), d] as [string, string, boolean]);
     for (const m of round.matches) {
       if (m.status !== 'done' || !m.outcome || !m.decision) continue;
       const pairs: Array<[string, string, boolean]> = [];
@@ -62,9 +67,9 @@ function eventsOf(t: Tournament): Event[] {
       events.push({
         at: m.decision.at,
         order: seq++,
-        pairs,
+        pairs: mapPairs(pairs),
         groupSize: m.songIds.length,
-        songs: m.songIds.map((id) => byId.get(id)!).filter(Boolean),
+        songs: m.songIds.map((id) => real(id)!).filter(Boolean),
         tournamentId: t.id,
       });
     }
@@ -76,9 +81,9 @@ function eventsOf(t: Tournament): Event[] {
       events.push({
         at: p.decision.at,
         order: seq++,
-        pairs,
+        pairs: mapPairs(pairs),
         groupSize: p.contested.length,
-        songs: p.contested.map((id) => byId.get(id)!).filter(Boolean),
+        songs: p.contested.map((id) => real(id)!).filter(Boolean),
         tournamentId: t.id,
       });
     }

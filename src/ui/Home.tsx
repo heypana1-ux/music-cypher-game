@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { participantMap } from '../domain/participants';
 import { computeState } from '../domain/engine';
 import { songLine } from '../domain/results';
 import type { Tournament } from '../domain/types';
@@ -107,7 +108,7 @@ export function Home() {
                   <div className="grow">
                     <strong>{t.name}</strong>
                     <div className="small muted">
-                      {t.songs.length} Songs · {r ? `${r.label} · noch ${s.openItems.length} offen` : ''} · {fmtDate(t.updatedAt)}
+                      {t.draw.length} {t.artistMode ? 'Künstler' : 'Songs'} · {r ? `${r.label} · noch ${s.openItems.length} offen` : ''} · {fmtDate(t.updatedAt)}
                     </div>
                   </div>
                   <button className="btn primary small" onClick={() => go({ page: 'play', id: t.id })}>
@@ -135,7 +136,7 @@ export function Home() {
                 <div className="grow">
                   <strong>{t.name}</strong>
                   <div className="small muted">
-                    🏆 {songLine(t.songs.find((x) => x.id === s.champion))} · {t.songs.length} Songs · {fmtDate(t.updatedAt)}
+                    🏆 {songLine(participantMap(t).get(s.champion!))} · {t.draw.length} {t.artistMode ? 'Künstler' : 'Songs'} · {fmtDate(t.updatedAt)}
                   </div>
                 </div>
                 <button className="btn small" onClick={() => go({ page: 'result', id: t.id })}>

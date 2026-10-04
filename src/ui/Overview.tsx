@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { computeState, reopen } from '../domain/engine';
 import type { MatchState, PlayoffState, RoundState, Song } from '../domain/types';
+import { roundEntries, unitize } from '../domain/participants';
 import { Modal, Seg } from './common';
 import { TournamentStatsView } from './Stats';
 import { describeTarget, groupName } from './Play';
@@ -24,7 +25,12 @@ export function Overview({ id }: { id: string }) {
       </div>
     );
   }
-  const songs = new Map(t.songs.map((s) => [s.id, s]));
+  // Per round: in an artist cypher every round has different songs.
+  const songsFor = (ri: number) => {
+    const m = roundEntries(t, ri);
+    if (!t.artistMode) return m;
+    return new Map([...m].map(([id, s]) => [id, { ...s, title: `${s.artists[0]} – ${s.title}` }]));
+  };
   const ri = roundIdx ?? state.rounds.length - 1;
   const round = state.rounds[ri];
   const removedCount = reopenId ? state.validDecisions.length - reopen(t, reopenId).length : 0;
@@ -71,7 +77,7 @@ export function Overview({ id }: { id: string }) {
               {r.matches
                 .filter((m) => m.kind !== 'bye')
                 .map((m) => (
-                  <MatchBox key={m.id} round={r} match={m} songs={songs} onReopen={setReopenId} blind={!!t.config.blindMode} />
+                  <MatchBox key={m.id} round={r} match={m} songs={songsFor(r.index)} onReopen={setReopenId} blind={!!t.config.blindMode} />
                 ))}
             </div>
           ))}
@@ -96,7 +102,7 @@ export function Overview({ id }: { id: string }) {
             <section className="card">
               <div className="section-title">
                 <h2 style={{ margin: 0 }}>{round.label}</h2>
-                <span className="muted small">{round.sublabel}</span>
+                <span className="muted small">{unitize(round.sublabel, !!t.artistMode)}</span>
                 {round.complete ? <span className="chip accent">abgeschlossen</span> : <span className="chip warn">läuft</span>}
               </div>
               {round.notes.map((n) => (
@@ -113,10 +119,10 @@ export function Overview({ id }: { id: string }) {
                 {round.matches
                   .filter((m) => !(round.isPrelim && m.kind === 'bye'))
                   .map((m) => (
-                    <MatchBox key={m.id} round={round} match={m} songs={songs} onReopen={setReopenId} blind={!!t.config.blindMode} />
+                    <MatchBox key={m.id} round={round} match={m} songs={songsFor(round.index)} onReopen={setReopenId} blind={!!t.config.blindMode} />
                   ))}
                 {round.playoffs.map((p) => (
-                  <PlayoffBox key={p.id} round={round} playoff={p} songs={songs} onReopen={setReopenId} />
+                  <PlayoffBox key={p.id} round={round} playoff={p} songs={songsFor(round.index)} onReopen={setReopenId} />
                 ))}
               </div>
               {round.isPrelim && round.byes > 0 && (
@@ -125,7 +131,7 @@ export function Overview({ id }: { id: string }) {
                   <p className="small muted">
                     {round.matches
                       .filter((m) => m.kind === 'bye')
-                      .map((m) => songs.get(m.songIds[0])?.title)
+                      .map((m) => songsFor(round.index).get(m.songIds[0])?.title)
                       .join(' · ')}
                   </p>
                 </details>

@@ -95,7 +95,7 @@ export const player = {
     const my = ++token;
     this.stop(false);
     const info = playbackFor(song, localIds);
-    const snippetStart = prefs.snippetStart[song.id] ?? 0;
+    const snippetStart = prefs.snippetStart[song.audioKey ?? song.id] ?? 0;
     set({ song, kind: info.kind, position: 0, duration: 0, error: null, snippetStart });
     if (info.kind === 'spotify') {
       set({ status: 'embed' });
@@ -109,7 +109,7 @@ export const player = {
     let src: string;
     try {
       if (info.kind === 'local') {
-        const stored = await getAudio(song.id);
+        const stored = await getAudio(song.audioKey ?? song.id);
         if (!stored) throw new Error('missing');
         if (my !== token) return;
         objectUrl = URL.createObjectURL(stored.blob);
@@ -175,7 +175,7 @@ export const player = {
   setSnippetStartHere() {
     if (!audio || !state.song) return;
     const start = Math.floor(audio.currentTime);
-    prefs = { ...prefs, snippetStart: { ...prefs.snippetStart, [state.song.id]: start } };
+    prefs = { ...prefs, snippetStart: { ...prefs.snippetStart, [state.song.audioKey ?? state.song.id]: start } };
     savePrefs(prefs);
     set({ snippetStart: start, mode: 'snippet' });
   },

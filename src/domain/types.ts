@@ -20,7 +20,12 @@ export interface Song {
   demoTone?: number;
   /** Position in the original import (for "ursprüngliche Reihenfolge"). */
   originalIndex: number;
+  /** Artist mode: the real song ID behind a participant proxy (local audio, snippet start). */
+  audioKey?: string;
 }
+
+/** How the next round's groups are formed. */
+export type RegroupMode = 'bracket' | 'mix' | 'random';
 
 export type MatchFormat = 'duel' | 'cypher';
 export type Evaluation = 'select' | 'rank' | 'score';
@@ -37,8 +42,14 @@ export interface TournamentConfig {
   /** For extraMode 'perRound': number of extra spots per round. */
   extraPerRound: number;
   drawMode: DrawMode;
-  /** Cypher only: draw new groups every round (seeded and stored). */
+  /** Cypher only: draw new groups every round (seeded and stored). Legacy – see `regroup`. */
   reshufflePerRound: boolean;
+  /**
+   * Cypher only: how qualifiers are grouped for the next round.
+   * bracket = stable tree, mix = songs from the same group are split up, random = new draw.
+   * Undefined → derived from reshufflePerRound (older saves).
+   */
+  regroup?: RegroupMode;
   avoidSameArtist: boolean;
   /** Duel only: 'auto' or a power of two naming the main round (e.g. 128 = 64stel-Finale). */
   duelMainRound: 'auto' | number;
@@ -48,6 +59,8 @@ export interface TournamentConfig {
   showRankPoints: boolean;
   /** Hide title, artist and cover until a match is decided. */
   blindMode?: boolean;
+  /** Don't show earlier scores/places on the cards (always on in blind mode). */
+  hidePastScores?: boolean;
   /** Party mode: names of everyone voting on this device (2–8). Empty/undefined = solo. */
   partyPlayers?: string[];
   presetId?: string;
@@ -100,6 +113,18 @@ export interface Tournament {
   postponed: string[];
   /** Import summary at freeze time (informational). */
   sourceInfo?: string;
+  /**
+   * Artist cypher: participants are artists, each brings a new song every round.
+   * Then `draw` and all decisions use participant IDs ("ar:…"), `songs` holds the real songs.
+   */
+  artistMode?: { participants: ArtistParticipant[] };
+}
+
+export interface ArtistParticipant {
+  id: string;
+  name: string;
+  /** Real song IDs in playing order: round 1 plays songIds[0], round 2 songIds[1], … */
+  songIds: string[];
 }
 
 export type MatchKind = 'duel' | 'cypher' | 'special' | 'bye' | 'final' | 'thirdPlace';

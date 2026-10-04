@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { checkConfig, describeConfig, normalizeConfig, PRESETS } from '../domain/config';
-import { makeDraw, nextPow2, previewRounds } from '../domain/engine';
+import { makeDraw, nextPow2, previewRounds, regroupMode } from '../domain/engine';
+import { buildArtistParticipants, participants as participantsOf, planArtists, unitize } from '../domain/participants';
 import { newId, randomSeed } from '../domain/rng';
 import type { Tournament, TournamentConfig } from '../domain/types';
 import { playbackFor } from '../playback/sources';
@@ -18,8 +19,19 @@ export function Setup() {
     const ids = new Set(library.selected);
     return library.songs.filter((s) => ids.has(s.id));
   }, [library]);
-  const n = selectedSongs.length;
-  const check = checkConfig(config, n);
+  const [artistOn, setArtistOn] = useState(false);
+  const [artistLimit, setArtistLimit] = useState(0);
+  const [artistOrder, setArtistOrder] = useState<'random' | 'original'>('random');
+  const plan = useMemo(
+    () => (artistOn ? planArtists(selectedSongs, config, artistLimit || undefined) : null),
+    [artistOn, selectedSongs, config, artistLimit],
+  );
+  const n = plan ? plan.eligible.length : selectedSongs.length;
+  const baseCheck = checkConfig(config, n);
+  const check =
+    plan && n < 2
+      ? { ...baseCheck, errors: ['Für eine Künstler-Cypher braucht es mindestens zwei Künstler mit genug Songs in deiner Auswahl.'] }
+      : baseCheck;
   const preview = useMemo(() => (n >= 2 && check.errors.length === 0 ? previewRounds(config, n) : []), [config, n, check.errors.length]);
   const noAudio = selectedSongs.filter((s) => playbackFor(s, localAudio).kind === 'none').length;
   const spotifyOnly = selectedSongs.filter((s) => playbackFor(s, localAudio).kind === 'spotify').length;
@@ -44,8 +56,17 @@ export function Setup() {
     if (starting || check.errors.length) return;
     setStarting(true);
     const seed = randomSeed();
-    const frozen = selectedSongs.map((s) => ({ ...s }));
-    const { draw, notes } = makeDraw(frozen, config, seed);
+    let frozen = selectedSongs.map((s) => ({ ...s }));
+    let artistMode: Tournament['artistMode'];
+    let drawSource = frozen;
+    if (plan) {
+      const parts = buildArtistParticipants(plan.eligible, plan.rounds, artistOrder, seed);
+      const used = new Set(parts.flatMap((p) => p.songIds));
+      frozen = frozen.filter((s) => used.has(s.id));
+      artistMode = { participants: parts };
+      drawSource = participantsOf({ songs: frozen, artistMode });
+    }
+    const { draw, notes } = makeDraw(drawSource, plan ? { ...config, avoidSameArtist: false } : config, seed);
     const now = new Date().toISOString();
     const t: Tournament = {
       id: newId('t-'),
@@ -60,6 +81,7 @@ export function Setup() {
       decisions: [],
       postponed: [],
       sourceInfo: library.summary.sources.join(', '),
+      artistMode,
     };
     saveTournament(t);
     go({ page: 'play', id: t.id });
@@ -125,7 +147,7 @@ export function Setup() {
               key={p.id}
               className="preset"
               aria-pressed={config.presetId === p.id}
-              onClick={() => setSetupConfig({ ...p.config, avoidSameArtist: config.avoidSameArtist, drawMode: config.drawMode, blindMode: config.blindMode, partyPlayers: config.partyPlayers })}
+              onClick={() => setSetupConfig({ ...p.config, avoidSameArtist: config.avoidSameArtist, drawMode: config.drawMode, blindMode: config.blindMode, partyPlayers: config.partyPlayers, hidePastScores: config.hidePastScores, regroup: config.regroup })}
             >
               <span className="pname">
                 {config.presetId === p.id && <span aria-hidden="true">✓</span>}
@@ -177,6 +199,28 @@ export function Setup() {
                   { value: 3, label: '3 Songs' },
                 ]}
               />
+            </div>
+          )}
+          {!isDuel && (
+            <div className="opt-group">
+              <span className="label">Nächste Runde</span>
+              <Seg
+                label="Gruppen der nächsten Runde"
+                value={regroupMode(config)}
+                onChange={(v) => set({ regroup: v, reshufflePerRound: v === 'random' })}
+                options={[
+                  { value: 'bracket', label: 'Turnierbaum' },
+                  { value: 'mix', label: 'Mischen' },
+                  { value: 'random', label: 'Neu auslosen' },
+                ]}
+              />
+              <span className="tiny muted">
+                {regroupMode(config) === 'bracket'
+                  ? 'Fester Baum: Wer zusammen weiterkommt, trifft sich in der nächsten Runde wieder.'
+                  : regroupMode(config) === 'mix'
+                    ? 'Wer gerade in einer Gruppe war, wird getrennt – Gruppensieger treffen auf Zweite aus anderen Gruppen.'
+                    : 'Jede Runde komplett neu gelost (gespeichert, Neuladen ändert nichts).'}
+              </span>
             </div>
           )}
           {extrasPossible && (
@@ -249,15 +293,6 @@ export function Setup() {
               <span className="tiny muted">Wird wenn möglich eingehalten; sonst erklärt die App, warum nicht.</span>
             </span>
           </label>
-          {!isDuel && (
-            <label className="check">
-              <input type="checkbox" checked={config.reshufflePerRound} onChange={(e) => set({ reshufflePerRound: e.target.checked })} />
-              <span>
-                Jede Runde neu auslosen
-                <span className="tiny muted">Standard: Der Turnieraufbau bleibt stabil. Neue Auslosungen werden gespeichert.</span>
-              </span>
-            </label>
-          )}
           {!isDuel && config.evaluation === 'rank' && (
             <label className="check">
               <input type="checkbox" checked={config.showRankPoints} onChange={(e) => set({ showRankPoints: e.target.checked })} />
@@ -301,6 +336,81 @@ export function Setup() {
       <section className="card">
         <h2>Spielmodus</h2>
         <div className="grid-2">
+          <div className="stack" style={{ gap: 8 }}>
+            <label className="check">
+              <input type="checkbox" checked={artistOn} onChange={(e) => setArtistOn(e.target.checked)} />
+              <span>
+                <strong>Künstler-Cypher</strong>
+                <span className="tiny muted">
+                  Künstler treten gegeneinander an – jede Runde bringt jeder einen neuen Song. Nur Künstler mit genug Songs in deiner Auswahl.
+                </span>
+              </span>
+            </label>
+            {artistOn && plan && (
+              <div className="stack" style={{ gap: 8 }}>
+                <div className="row small">
+                  <span className="muted">Wie viele Künstler?</span>
+                  <Seg
+                    label="Anzahl Künstler"
+                    value={artistLimit}
+                    onChange={setArtistLimit}
+                    options={[
+                      { value: 0, label: 'Alle' },
+                      { value: 8, label: '8' },
+                      { value: 16, label: '16' },
+                      { value: 32, label: '32' },
+                    ]}
+                  />
+                </div>
+                <div className="row small">
+                  <span className="muted">Song-Reihenfolge</span>
+                  <Seg
+                    label="Song-Reihenfolge"
+                    value={artistOrder}
+                    onChange={setArtistOrder}
+                    options={[
+                      { value: 'random', label: 'Zufällig' },
+                      { value: 'original', label: 'Wie importiert' },
+                    ]}
+                  />
+                </div>
+                <div className={`notice small ${plan.eligible.length >= 2 ? 'ok' : 'warn'}`}>
+                  <strong>
+                    {plan.eligible.length} Künstler · {plan.rounds} Runden · je {plan.rounds} Songs
+                  </strong>
+                  <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {plan.eligible.slice(0, 32).map((a) => (
+                      <span key={a.key} className="chip">
+                        {a.name} · {a.songs.length}
+                      </span>
+                    ))}
+                  </div>
+                  {plan.tooFew.length > 0 && (
+                    <div className="tiny muted" style={{ marginTop: 6 }}>
+                      Nicht dabei: {plan.tooFew.length} Künstler mit weniger als {Math.max(2, plan.rounds)} Songs
+                      {artistLimit ? ' oder außerhalb der Top ' + artistLimit : ''}.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="stack" style={{ gap: 8 }}>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={!!config.hidePastScores || !!config.blindMode}
+                disabled={!!config.blindMode}
+                onChange={(e) => setSetupConfig({ ...config, hidePastScores: e.target.checked })}
+              />
+              <span>
+                <strong>Frühere Punkte ausblenden</strong>
+                <span className="tiny muted">
+                  Auf den Songkarten stehen keine Punkte oder Plätze aus früheren Runden – du bewertest unbeeinflusst. Im Blind-Modus immer an.
+                </span>
+              </span>
+            </label>
+          </div>
           <div className="stack" style={{ gap: 8 }}>
             <label className="check">
               <input type="checkbox" checked={!!config.blindMode} onChange={(e) => setSetupConfig({ ...config, blindMode: e.target.checked })} />
@@ -392,7 +502,7 @@ export function Setup() {
               <li key={i}>
                 <span className="num">{r.songs}</span>
                 <div>
-                  <strong>{r.label}</strong> <span className="muted small">· {r.sublabel}</span>
+                  <strong>{r.label}</strong> <span className="muted small">· {unitize(r.sublabel, artistOn)}</span>
                   {r.extraSpots > 0 && <div className="small" style={{ color: 'var(--violet)' }}>+ {r.extraSpots} Zusatzplatz/-plätze</div>}
                   {r.notes.map((note) => (
                     <div key={note} className="tiny muted">

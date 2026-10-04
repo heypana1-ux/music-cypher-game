@@ -51,6 +51,22 @@ Eine austauschbare Schnittstelle für Quellen ist vorbereitet (`src/playback/sou
 
   Ein Gleichstand an der Qualifikationsgrenze wird gemeinsam entschieden. Die Einzelstimmen werden gespeichert, und die Statistik zeigt, wer am häufigsten mit der Gruppe lag.
 
+- **Nächste Runde (Cypher):** Für die Gruppen der nächsten Runde gibt es drei Varianten.
+  - **Turnierbaum:** Der Aufbau bleibt fest.
+  - **Mischen:** Songs aus derselben Gruppe werden getrennt, und Gruppensieger treffen auf Zweite anderer Gruppen.
+  - **Neu auslosen.**
+
+  Alle drei sind reproduzierbar gespeichert.
+- **Frühere Punkte ausblenden:** Die Karten zeigen keine Punkte oder Plätze aus früheren Runden, damit du unbeeinflusst bewertest. Im Blind-Modus ist das immer an, auch beim Vergleich um Zusatzplätze.
+- **Turnierbaum als Bild:**
+  - Duelle werden als echter Baum mit Verbindungslinien gezeichnet, Cyphers als Gruppenspalten.
+  - Große Turniere können bei einer späteren Runde beginnen.
+- **Künstler-Cypher:** Künstler treten gegeneinander an, und jede Runde bringt jeder einen neuen Song.
+  - Die App wählt die größtmögliche Gruppe von Künstlern, die für jede Runde einen Song haben. Mehr Künstler bedeuten mehr Runden.
+  - Optional lässt sich das auf 8, 16 oder 32 Künstler begrenzen.
+  - Die Song-Reihenfolge ist zufällig oder folgt der Import-Reihenfolge.
+  - Das Gesamt-Rating bewertet die tatsächlich gespielten Songs.
+
 ## Architektur
 
 React + TypeScript + Vite. Der Stack ist schlank, typsicher und braucht kein Backend.

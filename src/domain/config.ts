@@ -1,4 +1,4 @@
-import { isPowerOfTwo, nextPow2, perRoundSpots } from './engine';
+import { isPowerOfTwo, nextPow2, perRoundSpots, regroupMode } from './engine';
 import type { TournamentConfig } from './types';
 
 export interface Preset {
@@ -68,6 +68,7 @@ export function normalizeConfig(c: TournamentConfig): TournamentConfig {
     n.evaluation = 'select';
     n.extraMode = 'none';
     n.reshufflePerRound = false;
+    n.regroup = undefined;
   } else {
     n.duelMainRound = 'auto';
     n.thirdPlaceMatch = false;
@@ -132,10 +133,13 @@ export function describeConfig(c: TournamentConfig): string[] {
     lines.push(`Bewertung: ${evaluationLabel(c)}.`);
     if (c.extraMode === 'perBlock') lines.push('Ein Zusatzplatz je Block aus zwei Cyphers.');
     if (c.extraMode === 'perRound') lines.push(`${c.extraPerRound} Zusatzplatz/-plätze je Runde.`);
-    if (c.reshufflePerRound) lines.push('Gruppen werden jede Runde neu ausgelost.');
+    const rg = regroupMode(c);
+    if (rg === 'random') lines.push('Gruppen werden jede Runde neu ausgelost.');
+    if (rg === 'mix') lines.push('Gruppen werden jede Runde gemischt: Wer zusammen war, wird getrennt.');
   }
   lines.push(c.drawMode === 'random' ? 'Zufällige Auslosung.' : 'Ursprüngliche Reihenfolge als Setzliste.');
   if (c.blindMode) lines.push('Blind-Modus: Songs bleiben bis zur Entscheidung verdeckt.');
+  else if (c.hidePastScores) lines.push('Frühere Punkte werden während des Spiels ausgeblendet.');
   if (c.partyPlayers?.length) lines.push(`Partymodus mit ${c.partyPlayers.filter((p) => p.trim()).join(', ')}.`);
   if (c.avoidSameArtist) lines.push('Gleiche Interpreten in Runde 1 möglichst getrennt.');
   return lines;
