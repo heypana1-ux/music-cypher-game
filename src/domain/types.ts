@@ -120,6 +120,19 @@ export interface Tournament {
   artistMode?: { participants: ArtistParticipant[] };
   /** Season this tournament counts for. */
   seasonId?: string;
+  /** Car mode: marks made while listening, per match/playoff ID. Not a decision yet. */
+  drafts?: Record<string, CarDraft>;
+}
+
+/** Car mode rating buttons: 4 = Top, 3 = Gut, 2 = Okay, 1 = Raus. */
+export type CarRating = 1 | 2 | 3 | 4;
+
+export interface CarDraft {
+  ratings: Record<string, CarRating>;
+  stars: string[];
+  /** Songs that were played (or skipped) in the car. */
+  heard: string[];
+  updatedAt: string;
 }
 
 export interface ArtistParticipant {

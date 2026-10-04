@@ -452,3 +452,60 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-directio
 .form .f-top { background: var(--accent); color: var(--accent-ink); }
 .form .f-mid { background: var(--accent-soft); color: var(--accent); }
 .form .f-none { opacity: 0.5; }
+
+/* Car mode: huge targets, high contrast, nothing to read while driving */
+.car { position: fixed; inset: 0; z-index: 80; background: #07070b; color: var(--text); display: flex; flex-direction: column; overflow: hidden; }
+.car-content { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.car-top { display: flex; align-items: center; gap: 12px; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; border-bottom: 1px solid var(--line); }
+.car-body { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 16px; max-width: 760px; width: 100%; margin: 0 auto; }
+.car-center { align-items: center; justify-content: center; text-align: center; }
+.car-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-weight: 700; }
+.car-setting .seg button { min-height: 48px; padding: 8px 18px; font-size: 1rem; }
+.car-start { min-height: 80px; font-size: 1.5rem; border-radius: 22px; width: 100%; }
+.car-big { min-height: 72px; font-size: 1.25rem; border-radius: 20px; width: 100%; }
+.car-dots { display: flex; gap: 8px; justify-content: center; }
+.car-dots span { width: 14px; height: 14px; border-radius: 50%; background: var(--surface-2); border: 2px solid var(--line); }
+.car-dots span.done { background: var(--faint); border-color: var(--faint); }
+.car-dots span.now { background: var(--accent); border-color: var(--accent); }
+.car-song { text-align: center; }
+.car-num { font-weight: 800; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.95rem; }
+.car-title { font-size: clamp(1.8rem, 7vw, 3rem); font-weight: 800; line-height: 1.1; margin-top: 6px; overflow-wrap: anywhere; }
+.car-artist { font-size: clamp(1.1rem, 4vw, 1.5rem); color: var(--muted); margin-top: 4px; }
+.car-progress { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.car-progress > div { height: 100%; background: var(--accent); transition: width 0.5s linear; }
+.car-time { text-align: center; font-variant-numeric: tabular-nums; }
+.car-rate { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.car-rate-btn { min-height: 92px; border-radius: 22px; border: 3px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-size: 1.5rem; font-weight: 800; cursor: pointer; }
+.car-rate-btn[aria-pressed='true'] { color: #0b0b0f; }
+.car-rate-btn.r4[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); }
+.car-rate-btn.r3[aria-pressed='true'] { background: #8be08b; border-color: #8be08b; }
+.car-rate-btn.r2[aria-pressed='true'] { background: var(--warn); border-color: var(--warn); }
+.car-rate-btn.r1[aria-pressed='true'] { background: var(--danger); border-color: var(--danger); }
+.car-star { min-height: 140px; border-radius: 28px; border: 3px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-size: 2.2rem; font-weight: 800; cursor: pointer; }
+.car-star.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.car-flash { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 90; font-size: 2.6rem; font-weight: 800; background: rgba(0, 0, 0, 0.8); padding: 14px 28px; border-radius: 20px; animation: pop 0.2s ease; pointer-events: none; }
+.car-controls { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 12px; margin-top: auto; }
+.car-ctl { min-height: 80px; font-size: 2rem; border-radius: 22px; }
+.car-embed { flex: none; padding: 0 12px calc(8px + env(safe-area-inset-bottom)); max-width: 760px; width: 100%; margin: 0 auto; }
+.car-embed:empty { display: none; }
+.car-embed iframe { width: 100%; height: 152px; border: 0; border-radius: 12px; }
+.car-review { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.car-review li { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 16px; background: var(--surface); border: 2px solid var(--line); font-size: 1.15rem; }
+.car-review li.q { border-color: var(--accent); background: var(--accent-soft); }
+.car-rv-mark { font-weight: 800; font-size: 1.4rem; width: 32px; text-align: center; }
+.car-review li.q .car-rv-mark { color: var(--accent); }
+.car-rv-title { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.car-rv-rating { font-weight: 800; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); font-size: 0.95rem; }
+.car-rv-rating.r4 { background: var(--accent); color: var(--accent-ink); }
+.car-rv-rating.r3 { background: #8be08b; color: #0b0b0f; }
+.car-rv-rating.r2 { background: var(--warn); color: #0b0b0f; }
+.car-rv-rating.r1 { background: var(--danger); color: #0b0b0f; }
+.car-actions { display: flex; flex-direction: column; gap: 12px; margin-top: auto; }
+.car-crown { font-size: 5rem; }
+@media (max-height: 700px) {
+  .car-rate-btn { min-height: 70px; font-size: 1.25rem; }
+  .car-ctl { min-height: 64px; }
+  .car-embed iframe { height: 80px; }
+}
+.car-star-hint { text-align: center; font-weight: 800; font-size: 1.1rem; color: var(--muted); }
+.car-star-hint.over { color: var(--warn); }

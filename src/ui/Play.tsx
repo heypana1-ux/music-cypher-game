@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { addDecision, computeState, findMatch, findPlayoff, relevantTies, roundOfTarget, undoLast } from '../domain/engine';
 import { roundEntries, unitize } from '../domain/participants';
+import { proposal, RATING_SCORE, type DraftTarget, type Proposal } from '../domain/carDraft';
 import { newId } from '../domain/rng';
 import { aggregateVotes, applyTieOrder, type AggregateInput } from '../domain/party';
 import { computeRatings, headToHeadFor, ratingInsights, type HeadToHead } from '../domain/rating';
@@ -93,7 +94,7 @@ function useSongInfo(t: Tournament | undefined, state: TournamentState | null, a
   };
 }
 
-function matchTitle(round: RoundState, m: MatchState): string {
+export function matchTitle(round: RoundState, m: MatchState): string {
   const real = round.matches.filter((x) => x.kind !== 'bye' && x.kind !== 'thirdPlace');
   const pos = real.indexOf(m) + 1;
   switch (m.kind) {
@@ -176,7 +177,9 @@ export function Play({ id }: { id: string }) {
       toast('Diese Entscheidung wurde bereits gespeichert.');
       return;
     }
-    saveTournament({ ...t, decisions: next, postponed: t.postponed.filter((x) => x !== d.targetId) });
+    const drafts = { ...(t.drafts ?? {}) };
+    delete drafts[d.targetId];
+    saveTournament({ ...t, decisions: next, drafts, postponed: t.postponed.filter((x) => x !== d.targetId) });
     setJustDecided(d.targetId);
     setFocus(null);
   };
@@ -212,6 +215,11 @@ export function Play({ id }: { id: string }) {
         <div className="muted small">{unitize(round.sublabel, !!t.artistMode)}</div>
       </div>
       <div className="row">
+        {!state.finished && !(t.config.partyPlayers && t.config.partyPlayers.length >= 2) && (
+          <button className="btn small" onClick={() => go({ page: 'car', id: t.id })}>
+            🚗 Fahrmodus
+          </button>
+        )}
         <button className="btn small ghost" onClick={() => go({ page: 'overview', id: t.id })}>
           Übersicht
         </button>
@@ -446,6 +454,39 @@ interface BoardProps {
   onPostpone?: () => void;
   /** Party mode: the person currently voting. The board then submits a vote instead of a decision. */
   voter?: string;
+  /** Marks from the car mode, used to pre-fill the board. */
+  prefill?: CarPrefill | null;
+}
+
+interface CarPrefill {
+  p: Proposal;
+  scores: Record<string, number>;
+}
+
+/** Turn car-mode marks into a pre-filled board (never a silent decision – you still confirm). */
+function carPrefill(t: Tournament, target: DraftTarget): CarPrefill | null {
+  const d = t.drafts?.[target.id];
+  if (!d) return null;
+  const hasRatings = Object.keys(d.ratings).length > 0;
+  if (!hasRatings && !d.stars.length) return null;
+  const style = hasRatings ? 'buttons' : 'stars';
+  const p = proposal(target, d, style);
+  const scores: Record<string, number> = {};
+  for (const id of target.songIds) {
+    if (style === 'stars') scores[id] = d.stars.includes(id) ? 8 : 4;
+    else if (d.ratings[id]) scores[id] = RATING_SCORE[d.ratings[id]];
+  }
+  return { p, scores };
+}
+
+function PrefillNote({ prefill }: { prefill?: CarPrefill | null }) {
+  if (!prefill) return null;
+  return (
+    <div className="notice small">
+      🚗 Vorausgefüllt mit deinen Markierungen aus dem Fahrmodus{prefill.p.ties.length ? ' – bei Gleichstand bitte noch entscheiden' : ''}. Prüfen und
+      bestätigen.
+    </div>
+  );
 }
 
 function MatchBoard(props: BoardProps & { match: MatchState }) {
@@ -453,8 +494,15 @@ function MatchBoard(props: BoardProps & { match: MatchState }) {
   const list = match.songIds.map((id) => songs.get(id)!);
   useNumberKeys(list);
   const isFinal = match.kind === 'final';
+  const prefill = carPrefill(props.t, {
+    id: match.id,
+    songIds: match.songIds,
+    advanceCount: match.advanceCount,
+    evaluation: match.evaluation,
+    candidateRequired: match.candidateRequired,
+  });
   const renderBoard = (extra: Partial<BoardProps>) => {
-    const p = { ...props, ...extra };
+    const p = { prefill: extra.voter ? null : prefill, ...props, ...extra };
     if (match.evaluation === 'select') return <SelectBoard {...p} list={list} />;
     if (match.evaluation === 'rank') return <RankBoard {...p} list={list} />;
     return <ScoreBoard {...p} list={list} />;
@@ -509,6 +557,7 @@ function MatchBoard(props: BoardProps & { match: MatchState }) {
         <span className="faint">Tasten 1–{list.length} spielen die Songs ab.</span>
       </p>
       {!props.t.config.blindMode && !props.t.config.hidePastScores && <HeadToHeadPanel list={list} />}
+      {players.length < 2 && <PrefillNote prefill={prefill} />}
       {board}
     </div>
   );
@@ -584,8 +633,10 @@ function DecisionBar({
   );
 }
 
-function SelectBoard({ match, list, onCommit, onPostpone, voter }: BoardProps & { match: MatchState; list: Song[] }) {
-  const [picked, setPicked] = useState<string[]>([]);
+function SelectBoard({ match, list, onCommit, onPostpone, voter, prefill }: BoardProps & { match: MatchState; list: Song[] }) {
+  const [picked, setPicked] = useState<string[]>(() =>
+    prefill && !prefill.p.ties.length ? prefill.p.selected.filter((id) => match.songIds.includes(id)) : [],
+  );
   const need = match.advanceCount;
   const toggle = (id: string) => {
     setPicked((p) => {
@@ -723,8 +774,8 @@ function RankList({
   );
 }
 
-function RankBoard({ t, match, list, songs, onCommit, onPostpone, voter }: BoardProps & { match: MatchState; list: Song[] }) {
-  const [order, setOrder] = useState<string[]>(match.songIds);
+function RankBoard({ t, match, list, songs, onCommit, onPostpone, voter, prefill }: BoardProps & { match: MatchState; list: Song[] }) {
+  const [order, setOrder] = useState<string[]>(() => prefill?.p.order ?? match.songIds);
   const [touched, setTouched] = useState(false);
   const isFinal = match.kind === 'final';
   return (
@@ -765,9 +816,9 @@ function sameSet(a: string[], b: string[]) {
   return a.length === b.length && a.every((x) => b.includes(x));
 }
 
-function ScoreBoard({ match, list, onCommit, onPostpone, voter }: BoardProps & { match: MatchState; list: Song[] }) {
+function ScoreBoard({ match, list, onCommit, onPostpone, voter, prefill }: BoardProps & { match: MatchState; list: Song[] }) {
   const label = useLabel();
-  const [scores, setScores] = useState<Record<string, number>>({});
+  const [scores, setScores] = useState<Record<string, number>>(() => prefill?.scores ?? {});
   const [tieOrder, setTieOrder] = useState<string[]>(match.songIds);
   const [resolved, setResolved] = useState<string[][]>([]);
   const allScored = match.songIds.every((id) => typeof scores[id] === 'number');
@@ -931,10 +982,13 @@ function PlayoffBoard(props: BoardProps & { playoff: PlayoffState }) {
   );
 }
 
-function PlayoffVote({ round, playoff, songs, onCommit, onPostpone, voter }: BoardProps & { playoff: PlayoffState }) {
+function PlayoffVote({ t, round, playoff, songs, onCommit, onPostpone, voter }: BoardProps & { playoff: PlayoffState }) {
+  const prefill = voter
+    ? null
+    : carPrefill(t, { id: playoff.id, songIds: playoff.contested, advanceCount: playoff.contestedSpots, evaluation: 'select', candidateRequired: false, isPlayoff: true });
   const hidePast = useContext(HidePastCtx);
   const showScores = playoff.scores && !hidePast;
-  const [picked, setPicked] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string[]>(() => (prefill && !prefill.p.ties.length ? prefill.p.selected : []));
   const list = playoff.contested.map((id) => songs.get(id)!);
   useNumberKeys(list);
   const need = playoff.contestedSpots;
@@ -977,6 +1031,7 @@ function PlayoffVote({ round, playoff, songs, onCommit, onPostpone, voter }: Boa
           : 'Ohne vergleichbare Punkte entscheidest du selbst.'}{' '}
         Wähle {need === 1 ? 'den Song' : `${need} Songs`}, der den Zusatzplatz bekommt.
       </p>
+      <PrefillNote prefill={prefill} />
       <div className={`cards ${list.length === 2 ? 'duel' : ''}`}>
         {list.map((s, i) => {
           const on = picked.includes(s.id);

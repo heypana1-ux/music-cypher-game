@@ -75,6 +75,15 @@ Eine austauschbare Schnittstelle für Quellen ist vorbereitet (`src/playback/sou
 - **Head-to-Head:** In jeder Begegnung lässt sich aufklappen, wie die Songs früher gegeneinander abgeschnitten haben. Die Bilanz ist standardmäßig zugeklappt und wird im Blind-Modus oder bei ausgeblendeten Punkten gar nicht gezeigt.
 - **Saison-Modus:** Mehrere Turniere zählen für eine gemeinsame Tabelle. Punkte gibt es so: Teilnahme 1, je überstandene Runde 2, Finale +3, Sieg +5. Dazu kommen Podium, Formkurve der letzten Turniere und Interpreten-Wertung. Beim Start wählst du die Saison oder fügst Turniere später hinzu.
 
+- **Fahrmodus 🚗:**
+  - **Bedienung:** Vollbild mit riesigen Knöpfen. Die Songs einer Cypher laufen nacheinander durch, wahlweise ganz oder 30 Sekunden. Eine Stimme sagt jeden Song an, und der Bildschirm bleibt an.
+  - **Bewerten:** Standard sind die Knöpfe Top, Gut, Okay und Raus. Alternativ markierst du mit ★ die Songs, die weiterkommen.
+  - **Entscheiden:**
+    - Nach dem letzten Song zeigt die App einen Vorschlag, den du mit einem Tipp übernimmst.
+    - Bei Gleichstand oder fehlenden Bewertungen gibt es keine Ein-Tipp-Bestätigung. Dann entscheidest du beim Halt, und die normale Ansicht ist mit deinen Markierungen vorausgefüllt.
+    - Mit „Später entscheiden“ werden die Markierungen gespeichert, und die nächste Cypher startet.
+  - **Spotify:** Songs laufen über Spotifys offizielles Embed-iFrame-API. Startet der Player nicht von selbst, genügt ein Tipp auf ▶ im eingeblendeten Spotify-Player. Die Weiter-Taste am Lenkrad funktioniert über die Media Session, sofern Browser und Auto das unterstützen.
+
 ## Architektur
 
 React + TypeScript + Vite. Der Stack ist schlank, typsicher und braucht kein Backend.
