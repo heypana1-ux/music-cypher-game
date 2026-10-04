@@ -36,6 +36,45 @@ Eine austauschbare Schnittstelle für Quellen ist vorbereitet (`src/playback/sou
 - **Zusatzplätze:** Es gibt keine, einen je Block aus zwei vollständigen Cyphers, oder eine feste Zahl je Runde (begrenzt, damit jede Runde Songs ausscheiden lässt). Verglichen werden die Erstplatzierten hinter den direkt Qualifizierten. Mit Punkten entscheidet die Punktzahl, bei Gleichstand du selbst. Bei Rangfolge entscheidest immer du.
 - **Ergebnis:** Gewinner, Finale, Weg zum Sieg. Alle anderen Songs erscheinen nur gruppiert nach der Runde, in der sie ausgeschieden sind. Erfundene exakte Plätze gibt es nicht.
 
+## Extras
+
+- **Als App installieren (PWA):** Die App lässt sich auf den Homescreen legen und funktioniert nach dem ersten Besuch auch offline. Android und Chrome zeigen dafür einen „Installieren“-Knopf, auf dem iPhone geht es über „Teilen → Zum Home-Bildschirm“.
+- **Statistiken:** Es gibt eine Gesamtansicht und eine Ansicht pro Turnier. Dazu gehören Hall of Fame, Interpreten- und Songtabellen, Punkteverteilung und die knappsten Entscheidungen.
+- **Gesamt-Rating (Elo):** Das Rating entsteht aus allen Entscheidungen über alle Turniere. Jede Begegnung zählt als direkte Vergleiche zwischen den Songs, und eine Cypher bewegt die Werte etwa so stark wie ein Duell.
+- **Nach Spotify:** Du kopierst die Ergebnisliste als Spotify-Links und fügst sie in der Spotify-Desktop-App mit Strg+V in eine Playlist ein. Alternativ gibt es eine CSV für TuneMyMusic oder Soundiiz. Die Spotify-API wird dafür nicht gebraucht.
+- **Als Bild teilen:** Die App erzeugt eine Gewinner-Karte im Story-Format (1080 × 1920).
+- **Blind-Modus:** Titel, Interpret und Cover bleiben bis zur Entscheidung verdeckt. Das klappt nur mit eigenen Audiodateien oder Demo-Songs, weil der Spotify-Player den Titel selbst anzeigt.
+- **Partymodus:** 2 bis 8 Personen stimmen nacheinander am selben Gerät ab. Gezählt wird so:
+  - Bei direkter Auswahl gewinnen die meisten Stimmen.
+  - Bei Rangfolge werden Platzpunkte addiert.
+  - Bei Punkten zählt der Durchschnitt.
+
+  Ein Gleichstand an der Qualifikationsgrenze wird gemeinsam entschieden. Die Einzelstimmen werden gespeichert, und die Statistik zeigt, wer am häufigsten mit der Gruppe lag.
+
+- **Nächste Runde (Cypher):** Für die Gruppen der nächsten Runde gibt es drei Varianten.
+  - **Turnierbaum:** Der Aufbau bleibt fest.
+  - **Mischen:** Songs aus derselben Gruppe werden getrennt, und Gruppensieger treffen auf Zweite anderer Gruppen.
+  - **Neu auslosen.**
+
+  Alle drei sind reproduzierbar gespeichert.
+- **Frühere Punkte ausblenden:** Die Karten zeigen keine Punkte oder Plätze aus früheren Runden, damit du unbeeinflusst bewertest. Im Blind-Modus ist das immer an, auch beim Vergleich um Zusatzplätze.
+- **Turnierbaum als Bild:**
+  - Duelle werden als echter Baum mit Verbindungslinien gezeichnet, Cyphers als Gruppenspalten.
+  - Große Turniere können bei einer späteren Runde beginnen.
+- **Künstler-Cypher:** Künstler treten gegeneinander an, und jede Runde bringt jeder einen neuen Song.
+  - Die App wählt die größtmögliche Gruppe von Künstlern, die für jede Runde einen Song haben. Mehr Künstler bedeuten mehr Runden.
+  - Optional lässt sich das auf 8, 16 oder 32 Künstler begrenzen.
+  - Die Song-Reihenfolge ist zufällig oder folgt der Import-Reihenfolge.
+  - Das Gesamt-Rating bewertet die tatsächlich gespielten Songs.
+
+- **Underdogs & Überraschungen:**
+  - **Überraschungen:** Ein Song gewinnt eine Begegnung gegen einen Song, der zu diesem Zeitpunkt höher bewertet war.
+  - **Underdogs:** Songs, die vor dem Turnier weit unten im Rating standen und dann weit kamen.
+  - **Gestolperte Favoriten:** das Gegenstück dazu.
+  - **Rivalitäten:** Songs, die sich mehrfach begegnet sind, mit Bilanz.
+- **Head-to-Head:** In jeder Begegnung lässt sich aufklappen, wie die Songs früher gegeneinander abgeschnitten haben. Die Bilanz ist standardmäßig zugeklappt und wird im Blind-Modus oder bei ausgeblendeten Punkten gar nicht gezeigt.
+- **Saison-Modus:** Mehrere Turniere zählen für eine gemeinsame Tabelle. Punkte gibt es so: Teilnahme 1, je überstandene Runde 2, Finale +3, Sieg +5. Dazu kommen Podium, Formkurve der letzten Turniere und Interpreten-Wertung. Beim Start wählst du die Saison oder fügst Turniere später hinzu.
+
 ## Architektur
 
 React + TypeScript + Vite. Der Stack ist schlank, typsicher und braucht kein Backend.

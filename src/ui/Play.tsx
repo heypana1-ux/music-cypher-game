@@ -1,12 +1,97 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { addDecision, computeState, findMatch, findPlayoff, relevantTies, undoLast } from '../domain/engine';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { addDecision, computeState, findMatch, findPlayoff, relevantTies, roundOfTarget, undoLast } from '../domain/engine';
+import { roundEntries, unitize } from '../domain/participants';
 import { newId } from '../domain/rng';
-import type { Decision, MatchState, PlayoffState, RoundState, Song, Tournament, TournamentState } from '../domain/types';
+import { aggregateVotes, applyTieOrder, type AggregateInput } from '../domain/party';
+import { computeRatings, headToHeadFor, ratingInsights, type HeadToHead } from '../domain/rating';
+import { pct, songHistoryIndex } from '../domain/stats';
+import type { Decision, MatchState, PartyVote, PlayoffState, RoundState, Song, Tournament, TournamentState } from '../domain/types';
 import { player, usePlayer } from '../playback/player';
 import { artistsOf, Cover, Modal, PlaybackChip, PlayButton } from './common';
 import { useStore } from './store';
 
 type SongMap = Map<string, Song>;
+
+/** How a song is shown – blind mode replaces title, artist and cover until the decision. */
+interface Label {
+  title: string;
+  artists: string;
+  /** undefined → neutral placeholder cover */
+  song: Song | undefined;
+  hidden: boolean;
+}
+/** Hide earlier scores/places (blind mode or the "frühere Punkte ausblenden" option). */
+const HidePastCtx = createContext(false);
+/** Head-to-head records from all tournaments (including earlier rounds of this one). */
+const H2HCtx = createContext<Map<string, HeadToHead>>(new Map());
+const LabelCtx = createContext<(id: string) => Label>(() => ({ title: '', artists: '', song: undefined, hidden: false }));
+const useLabel = () => useContext(LabelCtx);
+
+function realLabels(songs: SongMap) {
+  return (id: string): Label => {
+    const s = songs.get(id);
+    return { title: s?.title ?? id, artists: artistsOf(s), song: s, hidden: false };
+  };
+}
+
+/** Blind mode: "Song 1" … in the order of the current encounter. Also masks the player bar. */
+function BlindProvider({ ids, children }: { ids: string[]; children: ReactNode }) {
+  const key = ids.join('|');
+  useEffect(() => {
+    player.setMask(Object.fromEntries(ids.map((id, i) => [id, `Song ${i + 1}`])));
+    return () => player.setMask(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const fn = (id: string): Label => {
+    const i = ids.indexOf(id);
+    return { title: i >= 0 ? `Song ${i + 1}` : 'Verdeckter Song', artists: 'verdeckt', song: undefined, hidden: true };
+  };
+  return <LabelCtx.Provider value={fn}>{children}</LabelCtx.Provider>;
+}
+
+/** Per-song info line on cards: results so far in this tournament and in earlier ones. */
+const SongInfoCtx = createContext<(songId: string) => ReactNode>(() => null);
+
+function useSongInfo(t: Tournament | undefined, state: TournamentState | null, all: Tournament[]) {
+  const others = all.filter((x) => x.id !== t?.id);
+  const othersKey = others.map((o) => o.id + o.updatedAt).join('|');
+  const history = useMemo(() => songHistoryIndex(others), [othersKey]);
+  const ratings = useMemo(() => new Map(computeRatings(others).map((r) => [r.song.id, r.rating])), [othersKey]);
+  return (songId: string): ReactNode => {
+    const parts: ReactNode[] = [];
+    if (state) {
+      for (const r of state.rounds) {
+        for (const m of r.matches) {
+          if (m.status !== 'done' || !m.songIds.includes(songId) || !m.outcome) continue;
+          const q = m.outcome.qualified.includes(songId);
+          const e = r.playoffs.some((p) => p.winners.includes(songId));
+          const score = m.decision?.scores?.[songId];
+          const place = m.outcome.order ? m.outcome.order.indexOf(songId) + 1 : null;
+          parts.push(
+            <span key={m.id} className={q || e ? 'hist-q' : 'hist-x'}>
+              R{r.index + 1} {q ? '✓' : e ? '◆' : '✕'}
+              {score !== undefined ? ` ${score} P.` : place ? ` Pl. ${place}` : ''}
+            </span>,
+          );
+        }
+      }
+    }
+    const h = history.get(songId);
+    if (!parts.length && !h) return null;
+    return (
+      <div className="song-hist">
+        {parts.length > 0 && <div>Bisher: {parts}</div>}
+        {h && (
+          <div className="faint">
+            Früher: {h.appearances}× dabei{h.titles ? ` · ${h.titles}× Sieger 🏆` : h.finals ? ` · ${h.finals}× Finale` : ''}
+            {h.winRate !== null ? ` · ${pct(h.winRate)} weiter` : ''}
+            {ratings.has(songId) ? ` · Rating ${Math.round(ratings.get(songId)!)}` : ''}
+          </div>
+        )}
+      </div>
+    );
+  };
+}
 
 function matchTitle(round: RoundState, m: MatchState): string {
   const real = round.matches.filter((x) => x.kind !== 'bye' && x.kind !== 'thirdPlace');
@@ -40,6 +125,10 @@ export function Play({ id }: { id: string }) {
   const { tournaments, saveTournament, go, toast } = useStore();
   const t = tournaments.find((x) => x.id === id);
   const state = useMemo(() => (t ? computeState(t) : null), [t]);
+  const songInfo = useSongInfo(t, state, tournaments);
+  const h2hKey = tournaments.map((x) => x.id + x.updatedAt + x.decisions.length).join('|');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const h2h = useMemo(() => ratingInsights(tournaments).h2h, [h2hKey]);
   const [focus, setFocus] = useState<string | null>(null);
   const [justDecided, setJustDecided] = useState<string | null>(null);
   const [confirmUndo, setConfirmUndo] = useState(false);
@@ -70,8 +159,8 @@ export function Play({ id }: { id: string }) {
     );
   }
 
-  const songs: SongMap = new Map(t.songs.map((s) => [s.id, s]));
   const round = state.rounds[state.rounds.length - 1];
+  const songs: SongMap = roundEntries(t, round.index);
   const realMatches = state.rounds.flatMap((r) => r.matches.filter((m) => m.kind !== 'bye'));
   const decidedTotal = realMatches.filter((m) => m.status === 'done').length;
   const roundReal = round.matches.filter((m) => m.kind !== 'bye');
@@ -120,7 +209,7 @@ export function Play({ id }: { id: string }) {
       <div style={{ flex: 1, minWidth: 220 }}>
         <div className="small muted">{t.name}</div>
         <h1 style={{ margin: '2px 0' }}>{round.label}</h1>
-        <div className="muted small">{round.sublabel}</div>
+        <div className="muted small">{unitize(round.sublabel, !!t.artistMode)}</div>
       </div>
       <div className="row">
         <button className="btn small ghost" onClick={() => go({ page: 'overview', id: t.id })}>
@@ -167,7 +256,7 @@ export function Play({ id }: { id: string }) {
     return (
       <div className="stack">
         {header}
-        <DecidedPanel state={state} targetId={justDecided} songs={songs} />
+        <DecidedPanel state={state} targetId={justDecided} songs={roundEntries(t, roundOfTarget(justDecided))} blind={!!t.config.blindMode} />
         <div className="row end">
           {state.finished ? (
             <button className="btn primary big" onClick={() => go({ page: 'result', id: t.id })} autoFocus>
@@ -203,6 +292,10 @@ export function Play({ id }: { id: string }) {
   const postponedOpen = state.openItems.filter((o) => t.postponed.includes(o.id) && o.id !== current.id);
 
   return (
+    <SongInfoCtx.Provider value={songInfo}>
+    <H2HCtx.Provider value={h2h}>
+    <HidePastCtx.Provider value={!!(t.config.blindMode || t.config.hidePastScores)}>
+    <LabelCtx.Provider value={realLabels(songs)}>
     <div className="stack">
       {header}
       {round.notes.length > 0 && round.matches.every((m) => m.status !== 'done') && (
@@ -210,6 +303,12 @@ export function Play({ id }: { id: string }) {
           {round.notes.map((n) => (
             <div key={n}>{n}</div>
           ))}
+        </div>
+      )}
+      {t.artistMode && (
+        <div className="notice small">
+          🎤 <strong>Künstler-Cypher</strong> – in dieser Runde bringt jeder Künstler seinen {round.index + 1}. Song. Wer weiterkommt,
+          tritt nächste Runde mit einem neuen Song an.
         </div>
       )}
       {round.index === 0 && t.drawNotes.length > 0 && state.validDecisions.length === 0 && (
@@ -248,6 +347,10 @@ export function Play({ id }: { id: string }) {
       )}
       {undoModal}
     </div>
+    </LabelCtx.Provider>
+    </HidePastCtx.Provider>
+    </H2HCtx.Provider>
+    </SongInfoCtx.Provider>
   );
 }
 
@@ -281,23 +384,36 @@ function SongCard({
   children?: ReactNode;
 }) {
   const p = usePlayer();
+  const label = useLabel()(song.id);
+  const hidePast = useContext(HidePastCtx);
+  const info = useContext(SongInfoCtx)(song.id);
   const playing = p.song?.id === song.id;
   return (
-    <article className={`songcard ${picked ? 'picked' : ''} ${playing ? 'playing' : ''} ${dim ? 'out' : ''}`} aria-label={`Song ${index + 1}: ${song.title}`}>
+    <article
+      className={`songcard ${picked ? 'picked' : ''} ${playing ? 'playing' : ''} ${dim ? 'out' : ''} ${label.hidden ? 'blind' : ''}`}
+      aria-label={`Song ${index + 1}: ${label.title}`}
+    >
       {badge && <span className="badge-pick">{badge}</span>}
       {rankBadge && <span className="badge-rank">{rankBadge}</span>}
-      <Cover song={song} size="fill" />
+      {label.hidden ? (
+        <div className="cover blind-cover" aria-hidden="true">
+          <span>{index + 1}</span>
+        </div>
+      ) : (
+        <Cover song={song} size="fill" />
+      )}
       <div>
-        <div className="st">{song.title}</div>
-        <div className="sa">{artistsOf(song)}</div>
-        {song.album && <div className="tiny faint">{song.album}</div>}
+        <div className="st">{label.title}</div>
+        <div className="sa">{label.hidden ? '🙈 verdeckt bis zur Entscheidung' : artistsOf(song)}</div>
+        {!label.hidden && song.album && <div className="tiny faint">{song.album}</div>}
+        {!label.hidden && !hidePast && info}
       </div>
       <div>
         <PlaybackChip song={song} />
       </div>
       <div className="actions">
-        <PlayButton song={song} compact />
-        {song.spotifyTrackId && (
+        <PlayButton song={song} compact label={label.title} />
+        {!label.hidden && song.spotifyTrackId && (
           <a className="btn small ghost" href={`https://open.spotify.com/track/${song.spotifyTrackId}`} target="_blank" rel="noreferrer" title="In Spotify öffnen">
             Spotify ↗
           </a>
@@ -328,6 +444,8 @@ interface BoardProps {
   songs: SongMap;
   onCommit: (d: Omit<Decision, 'id' | 'at'>) => void;
   onPostpone?: () => void;
+  /** Party mode: the person currently voting. The board then submits a vote instead of a decision. */
+  voter?: string;
 }
 
 function MatchBoard(props: BoardProps & { match: MatchState }) {
@@ -335,6 +453,34 @@ function MatchBoard(props: BoardProps & { match: MatchState }) {
   const list = match.songIds.map((id) => songs.get(id)!);
   useNumberKeys(list);
   const isFinal = match.kind === 'final';
+  const renderBoard = (extra: Partial<BoardProps>) => {
+    const p = { ...props, ...extra };
+    if (match.evaluation === 'select') return <SelectBoard {...p} list={list} />;
+    if (match.evaluation === 'rank') return <RankBoard {...p} list={list} />;
+    return <ScoreBoard {...p} list={list} />;
+  };
+  const players = props.t.config.partyPlayers ?? [];
+  let board: ReactNode =
+    players.length >= 2 ? (
+      <PartyFlow
+        players={players}
+        input={match}
+        targetId={match.id}
+        renderBoard={(voter, onVote, first) =>
+          renderBoard({ voter, onCommit: (d) => onVote({ player: voter, selected: d.selected, order: d.order, scores: d.scores }), onPostpone: first ? props.onPostpone : undefined })
+        }
+        toDecision={(final, agg, votes) => {
+          const base = { targetId: match.id, songIds: match.songIds, votes };
+          if (match.evaluation === 'select') return { ...base, selected: final.slice(0, match.advanceCount) };
+          if (match.evaluation === 'rank') return { ...base, order: final };
+          return { ...base, scores: agg.value, order: final, resolvedTies: agg.ties };
+        }}
+        onCommit={props.onCommit}
+      />
+    ) : (
+      renderBoard({})
+    );
+  if (props.t.config.blindMode) board = <BlindProvider ids={match.songIds}>{board}</BlindProvider>;
   return (
     <div className="stack">
       {isFinal && (
@@ -362,10 +508,42 @@ function MatchBoard(props: BoardProps & { match: MatchState }) {
             : `Bewerte jeden Song von 1 bis 10. ${isFinal ? 'Die beste Bewertung gewinnt.' : `Die besten ${match.advanceCount} kommen weiter.`}`}{' '}
         <span className="faint">Tasten 1–{list.length} spielen die Songs ab.</span>
       </p>
-      {match.evaluation === 'select' && <SelectBoard {...props} list={list} />}
-      {match.evaluation === 'rank' && <RankBoard {...props} list={list} />}
-      {match.evaluation === 'score' && <ScoreBoard {...props} list={list} />}
+      {!props.t.config.blindMode && !props.t.config.hidePastScores && <HeadToHeadPanel list={list} />}
+      {board}
     </div>
+  );
+}
+
+/** Earlier meetings of the songs in this encounter – closed by default so nobody is nudged. */
+function HeadToHeadPanel({ list }: { list: Song[] }) {
+  const h2h = useContext(H2HCtx);
+  const ids = list.map((s) => s.audioKey ?? s.id);
+  const records = headToHeadFor(h2h, ids);
+  if (!records.length) return null;
+  const meetings = records.reduce((k, h) => k + h.meetings.length, 0);
+  return (
+    <details className="h2h-panel">
+      <summary>
+        🤝 Head-to-Head · {records.length === 1 ? 'diese Songs kennen sich' : `${records.length} Paarungen kennen sich`} ({meetings}{' '}
+        {meetings === 1 ? 'Begegnung' : 'Begegnungen'})
+      </summary>
+      <ul className="plain small">
+        {records.map((h) => {
+          const last = h.meetings[h.meetings.length - 1];
+          return (
+            <li key={h.a.id + h.b.id}>
+              {h.a.title} <strong>{h.winsA}</strong> : <strong>{h.winsB}</strong> {h.b.title}
+              {h.draws ? <span className="muted"> ({h.draws}× gleich)</span> : null}
+              <span className="muted">
+                {' '}
+                · zuletzt: {last.winner === null ? 'unentschieden' : `${last.winner === h.a.id ? h.a.title : h.b.title} vorn`} ({last.label},{' '}
+                {last.tournamentName})
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }
 
@@ -406,7 +584,7 @@ function DecisionBar({
   );
 }
 
-function SelectBoard({ match, list, onCommit, onPostpone }: BoardProps & { match: MatchState; list: Song[] }) {
+function SelectBoard({ match, list, onCommit, onPostpone, voter }: BoardProps & { match: MatchState; list: Song[] }) {
   const [picked, setPicked] = useState<string[]>([]);
   const need = match.advanceCount;
   const toggle = (id: string) => {
@@ -440,6 +618,7 @@ function SelectBoard({ match, list, onCommit, onPostpone }: BoardProps & { match
       <DecisionBar
         ready={picked.length === need}
         onPostpone={onPostpone}
+        confirmLabel={voter ? `Stimme abgeben (${voter})` : undefined}
         onConfirm={() => onCommit({ targetId: match.id, songIds: match.songIds, selected: picked })}
       >
         <span className={`counter ${picked.length === need ? 'ok' : ''}`} aria-live="polite">
@@ -480,6 +659,8 @@ function RankList({
 }) {
   const [drag, setDrag] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
+  const label = useLabel();
+  void songs;
   const move = (from: number, to: number) => {
     if (to < 0 || to >= order.length || from === to) return;
     const o = order.slice();
@@ -490,7 +671,7 @@ function RankList({
   return (
     <ol className="ranklist" aria-label="Rangfolge">
       {order.map((id, i) => {
-        const s = songs.get(id)!;
+        const s = label(id);
         const q = i < advance;
         const c = candidate && i === advance;
         return (
@@ -519,11 +700,11 @@ function RankList({
             }}
           >
             <span className="place">{placeLabel(i, order.length, showPoints)}</span>
-            <Cover song={s} size={40} className="rank-cover" />
+            {s.song ? <Cover song={s.song} size={40} className="rank-cover" /> : <div className="cover blind-cover rank-cover" style={{ width: 40, height: 40 }} aria-hidden="true" />}
             <div className="meta">
               <div className="title">{s.title}</div>
               <div className="sub">
-                {artistsOf(s)} {extra?.(id)}
+                {s.artists} {extra?.(id)}
               </div>
             </div>
             <span className="tiny rstatus">
@@ -542,7 +723,7 @@ function RankList({
   );
 }
 
-function RankBoard({ t, match, list, songs, onCommit, onPostpone }: BoardProps & { match: MatchState; list: Song[] }) {
+function RankBoard({ t, match, list, songs, onCommit, onPostpone, voter }: BoardProps & { match: MatchState; list: Song[] }) {
   const [order, setOrder] = useState<string[]>(match.songIds);
   const [touched, setTouched] = useState(false);
   const isFinal = match.kind === 'final';
@@ -570,7 +751,7 @@ function RankBoard({ t, match, list, songs, onCommit, onPostpone }: BoardProps &
       </section>
       <DecisionBar
         ready
-        confirmLabel="Rangfolge bestätigen"
+        confirmLabel={voter ? `Stimme abgeben (${voter})` : 'Rangfolge bestätigen'}
         onPostpone={onPostpone}
         onConfirm={() => onCommit({ targetId: match.id, songIds: match.songIds, order })}
       >
@@ -584,7 +765,8 @@ function sameSet(a: string[], b: string[]) {
   return a.length === b.length && a.every((x) => b.includes(x));
 }
 
-function ScoreBoard({ match, list, songs, onCommit, onPostpone }: BoardProps & { match: MatchState; list: Song[] }) {
+function ScoreBoard({ match, list, onCommit, onPostpone, voter }: BoardProps & { match: MatchState; list: Song[] }) {
+  const label = useLabel();
   const [scores, setScores] = useState<Record<string, number>>({});
   const [tieOrder, setTieOrder] = useState<string[]>(match.songIds);
   const [resolved, setResolved] = useState<string[][]>([]);
@@ -596,7 +778,8 @@ function ScoreBoard({ match, list, songs, onCommit, onPostpone }: BoardProps & {
         .sort((a, b) => (scores[b] ?? 0) - (scores[a] ?? 0) || tieOrder.indexOf(a) - tieOrder.indexOf(b)),
     [match.songIds, scores, tieOrder],
   );
-  const ties = allScored ? relevantTies(order, scores, match.advanceCount, match.candidateRequired) : [];
+  // A single party vote doesn't need tie-breaks – the group result does.
+  const ties = allScored && !voter ? relevantTies(order, scores, match.advanceCount, match.candidateRequired) : [];
   const open = ties.filter((c) => !resolved.some((r) => sameSet(r, c)));
 
   const setScore = (id: string, v: number) => {
@@ -624,7 +807,7 @@ function ScoreBoard({ match, list, songs, onCommit, onPostpone }: BoardProps & {
       <div className="cards">
         {list.map((s, i) => (
           <SongCard key={s.id} song={s} index={i} picked={typeof scores[s.id] === 'number'} rankBadge={scores[s.id] ? `${scores[s.id]} / 10` : undefined}>
-            <div className="score-pad" role="group" aria-label={`Bewertung für ${s.title}`}>
+            <div className="score-pad" role="group" aria-label={`Bewertung für ${label(s.id).title}`}>
               {Array.from({ length: 10 }, (_, k) => k + 1).map((v) => (
                 <button key={v} aria-pressed={scores[s.id] === v} onClick={() => setScore(s.id, v)} aria-label={`${v} Punkte`}>
                   {v}
@@ -637,10 +820,10 @@ function ScoreBoard({ match, list, songs, onCommit, onPostpone }: BoardProps & {
 
       {allScored && (
         <section className="card">
-          <h3>Ergebnis nach deinen Punkten</h3>
+          <h3>{voter ? `Reihenfolge nach Punkten von ${voter}` : 'Ergebnis nach deinen Punkten'}</h3>
           <ol className="ranklist">
             {order.map((id, i) => {
-              const s = songs.get(id)!;
+              const s = label(id);
               const q = i < match.advanceCount;
               const c = match.candidateRequired && i === match.advanceCount;
               return (
@@ -648,7 +831,7 @@ function ScoreBoard({ match, list, songs, onCommit, onPostpone }: BoardProps & {
                   <span className="place">{scores[id]} P.</span>
                   <div className="meta">
                     <div className="title">{s.title}</div>
-                    <div className="sub">{artistsOf(s)}</div>
+                    <div className="sub">{s.artists}</div>
                   </div>
                   <span className="tiny" style={{ minWidth: 90, textAlign: 'right' }}>
                     {q ? <span style={{ color: 'var(--accent)' }}>✓ weiter</span> : c ? <span style={{ color: 'var(--violet)' }}>◆ Zusatzplatz?</span> : <span className="faint">✕ raus</span>}
@@ -669,9 +852,9 @@ function ScoreBoard({ match, list, songs, onCommit, onPostpone }: BoardProps & {
                     <li key={id} className="rankitem" style={{ cursor: 'default' }}>
                       <span className="place">{i + 1}.</span>
                       <div className="meta">
-                        <div className="title">{songs.get(id)!.title}</div>
+                        <div className="title">{label(id).title}</div>
                       </div>
-                      <PlayButton song={songs.get(id)!} compact />
+                      <PlayButton song={list.find((x) => x.id === id)!} compact label={label(id).title} />
                       <button className="btn icon small ghost" onClick={() => moveInTie(id, -1, cluster)} disabled={i === 0} aria-label="nach oben">
                         ↑
                       </button>
@@ -698,7 +881,7 @@ function ScoreBoard({ match, list, songs, onCommit, onPostpone }: BoardProps & {
 
       <DecisionBar
         ready={allScored && open.length === 0}
-        confirmLabel="Bewertung bestätigen"
+        confirmLabel={voter ? `Stimme abgeben (${voter})` : 'Bewertung bestätigen'}
         onPostpone={onPostpone}
         onConfirm={() =>
           onCommit({
@@ -719,7 +902,38 @@ function ScoreBoard({ match, list, songs, onCommit, onPostpone }: BoardProps & {
   );
 }
 
-function PlayoffBoard({ round, playoff, songs, onCommit, onPostpone }: BoardProps & { playoff: PlayoffState }) {
+function PlayoffBoard(props: BoardProps & { playoff: PlayoffState }) {
+  const { playoff, t } = props;
+  const players = t.config.partyPlayers ?? [];
+  const wrap = (node: ReactNode) => (t.config.blindMode ? <BlindProvider ids={playoff.contested}>{node}</BlindProvider> : node);
+  if (players.length < 2) return wrap(<PlayoffVote {...props} />);
+  return wrap(
+    <PartyFlow
+      players={players}
+      input={{ songIds: playoff.contested, advanceCount: playoff.contestedSpots, evaluation: 'select', candidateRequired: false }}
+      targetId={playoff.id}
+      renderBoard={(voter, onVote, first) => (
+        <PlayoffVote
+          {...props}
+          voter={voter}
+          onPostpone={first ? props.onPostpone : undefined}
+          onCommit={(d) => onVote({ player: voter, selected: d.selected })}
+        />
+      )}
+      toDecision={(final, _agg, votes) => ({
+        targetId: playoff.id,
+        songIds: playoff.contested,
+        selected: final.slice(0, playoff.contestedSpots),
+        votes,
+      })}
+      onCommit={props.onCommit}
+    />
+  );
+}
+
+function PlayoffVote({ round, playoff, songs, onCommit, onPostpone, voter }: BoardProps & { playoff: PlayoffState }) {
+  const hidePast = useContext(HidePastCtx);
+  const showScores = playoff.scores && !hidePast;
   const [picked, setPicked] = useState<string[]>([]);
   const list = playoff.contested.map((id) => songs.get(id)!);
   useNumberKeys(list);
@@ -757,7 +971,9 @@ function PlayoffBoard({ round, playoff, songs, onCommit, onPostpone }: BoardProp
       </section>
       <p className="muted small" style={{ margin: 0 }}>
         {playoff.scores
-          ? `Gleichstand mit ${playoff.scores[playoff.contested[0]]} Punkten – du entscheidest im direkten Vergleich.`
+          ? hidePast
+            ? 'Gleichstand nach Punkten – du entscheidest im direkten Vergleich.'
+            : `Gleichstand mit ${playoff.scores[playoff.contested[0]]} Punkten – du entscheidest im direkten Vergleich.`
           : 'Ohne vergleichbare Punkte entscheidest du selbst.'}{' '}
         Wähle {need === 1 ? 'den Song' : `${need} Songs`}, der den Zusatzplatz bekommt.
       </p>
@@ -771,7 +987,7 @@ function PlayoffBoard({ round, playoff, songs, onCommit, onPostpone }: BoardProp
               index={i}
               picked={on}
               badge={on ? '✓ Zusatzplatz' : undefined}
-              rankBadge={`${groupOf(s.id)}${playoff.scores ? ` · ${playoff.scores[s.id]} P.` : ''}`}
+              rankBadge={`${groupOf(s.id)}${showScores ? ` · ${playoff.scores![s.id]} P.` : ''}`}
             >
               <button className="btn pick-btn" aria-pressed={on} onClick={() => toggle(s.id)} disabled={!on && need > 1 && picked.length >= need}>
                 {on ? '✓ Bekommt den Platz' : 'Diesen wählen'}
@@ -783,6 +999,7 @@ function PlayoffBoard({ round, playoff, songs, onCommit, onPostpone }: BoardProp
       <DecisionBar
         ready={picked.length === need}
         onPostpone={onPostpone}
+        confirmLabel={voter ? `Stimme abgeben (${voter})` : undefined}
         onConfirm={() => onCommit({ targetId: playoff.id, songIds: playoff.contested, selected: picked })}
       >
         <span className={`counter ${picked.length === need ? 'ok' : ''}`}>
@@ -793,7 +1010,7 @@ function PlayoffBoard({ round, playoff, songs, onCommit, onPostpone }: BoardProp
   );
 }
 
-function DecidedPanel({ state, targetId, songs }: { state: TournamentState; targetId: string; songs: SongMap }) {
+function DecidedPanel({ state, targetId, songs, blind }: { state: TournamentState; targetId: string; songs: SongMap; blind?: boolean }) {
   const m = findMatch(state, targetId);
   const p = findPlayoff(state, targetId);
   const round = state.rounds.find((r) => r.matches.some((x) => x.id === targetId) || r.playoffs.some((x) => x.id === targetId))!;
@@ -816,7 +1033,15 @@ function DecidedPanel({ state, targetId, songs }: { state: TournamentState; targ
   const scores = m?.decision?.scores;
   return (
     <section className="card result-panel" aria-live="polite">
-      <h2>{m ? (m.kind === 'final' ? 'Entschieden!' : 'Ergebnis') : 'Zusatzplatz vergeben'}</h2>
+      <h2>
+        {blind && m ? '🙉 Aufgelöst! ' : ''}
+        {m ? (m.kind === 'final' ? 'Entschieden!' : 'Ergebnis') : 'Zusatzplatz vergeben'}
+      </h2>
+      {m?.decision?.votes && (
+        <p className="small muted" style={{ marginTop: 0 }}>
+          Gruppenentscheid aus {m.decision.votes.length} Stimmen ({m.decision.votes.map((v) => v.player).join(', ')}).
+        </p>
+      )}
       {m && m.outcome && (
         <>
           {m.outcome.qualified.map((id) =>
@@ -863,6 +1088,195 @@ function DecidedPanel({ state, targetId, songs }: { state: TournamentState; targ
           <strong>{round.label} abgeschlossen.</strong> Weiter geht’s: {nextRound.label} – {nextRound.sublabel}.
         </div>
       )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Party mode: everyone votes in turn on the same device, then the group result is confirmed.
+
+function PartyFlow({
+  players,
+  input,
+  targetId,
+  renderBoard,
+  toDecision,
+  onCommit,
+}: {
+  players: string[];
+  input: AggregateInput;
+  targetId: string;
+  renderBoard: (voter: string, onVote: (v: PartyVote) => void, first: boolean) => ReactNode;
+  toDecision: (finalOrder: string[], agg: ReturnType<typeof aggregateVotes>, votes: PartyVote[]) => Omit<Decision, 'id' | 'at'>;
+  onCommit: (d: Omit<Decision, 'id' | 'at'>) => void;
+}) {
+  const [votes, setVotes] = useState<PartyVote[]>([]);
+  const [handover, setHandover] = useState(false);
+  const [resolved, setResolved] = useState<string[][]>([]);
+  const [tieOrder, setTieOrder] = useState<Record<string, string[]>>({});
+  const label = useLabel();
+  const idx = votes.length;
+  const done = idx >= players.length;
+
+  useEffect(() => {
+    player.stop();
+  }, [idx, handover]);
+
+  if (!done && handover) {
+    return (
+      <section className="card party-handover">
+        <div className="party-avatar" aria-hidden="true">
+          {players[idx].slice(0, 1).toUpperCase()}
+        </div>
+        <h2>Stimme von {players[idx - 1]} gespeichert ✓</h2>
+        <p className="muted">Gib das Gerät an <strong>{players[idx]}</strong> weiter. Die bisherigen Stimmen bleiben verdeckt.</p>
+        <button className="btn primary big" onClick={() => setHandover(false)} autoFocus>
+          Ich bin {players[idx]} – los geht’s
+        </button>
+      </section>
+    );
+  }
+
+  if (!done) {
+    return (
+      <div className="stack">
+        <div className="party-turn">
+          <span className="party-avatar small" aria-hidden="true">
+            {players[idx].slice(0, 1).toUpperCase()}
+          </span>
+          <div>
+            <strong>{players[idx]} ist dran</strong>
+            <div className="tiny muted">
+              Stimme {idx + 1} von {players.length}
+            </div>
+          </div>
+          <span className="spacer" />
+          <div className="party-dots" aria-hidden="true">
+            {players.map((p, i) => (
+              <span key={p} className={i < idx ? 'done' : i === idx ? 'now' : ''} title={p} />
+            ))}
+          </div>
+        </div>
+        <div key={`${targetId}-${idx}`}>
+          {renderBoard(
+            players[idx],
+            (v) => {
+              setVotes((vs) => [...vs, v]);
+              if (idx + 1 < players.length) setHandover(true);
+            },
+            idx === 0,
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const agg = aggregateVotes(input, votes);
+  // host's ordering of tied clusters (defaults to slot order)
+  const clusters = agg.ties.map((c) => tieOrder[c.slice().sort().join('|')] ?? c);
+  const finalOrder = applyTieOrder(agg.order, clusters);
+  const open = agg.ties.filter((c) => !resolved.some((r) => r.length === c.length && r.every((x) => c.includes(x))));
+  const max = Math.max(...Object.values(agg.value), 1);
+  const move = (cluster: string[], id: string, dir: -1 | 1) => {
+    const key = cluster.slice().sort().join('|');
+    const cur = (tieOrder[key] ?? cluster).slice();
+    const i = cur.indexOf(id);
+    const j = i + dir;
+    if (j < 0 || j >= cur.length) return;
+    [cur[i], cur[j]] = [cur[j], cur[i]];
+    setTieOrder((o) => ({ ...o, [key]: cur }));
+    setResolved((r) => r.filter((x) => !(x.length === cluster.length && x.every((y) => cluster.includes(y)))));
+  };
+
+  return (
+    <section className="card result-panel">
+      <h2>Gruppenergebnis</h2>
+      <p className="small muted" style={{ marginTop: 0 }}>
+        {input.evaluation === 'select' ? 'Stimmen pro Song' : input.evaluation === 'rank' ? 'Platzpunkte (Platz 1 bringt am meisten)' : 'Durchschnitt der Punkte'} ·{' '}
+        {input.advanceCount} {input.advanceCount === 1 ? 'kommt' : 'kommen'} weiter
+      </p>
+      <ol className="barlist">
+        {finalOrder.map((id, i) => (
+          <li key={id}>
+            <div className="bl-text">
+              <span className="bl-label">
+                {i < input.advanceCount ? '✓ ' : input.candidateRequired && i === input.advanceCount ? '◆ ' : '✕ '}
+                {label(id).title}
+              </span>
+              <span className="bl-sub">{label(id).artists}</span>
+            </div>
+            <div className="bl-track" aria-hidden="true">
+              <div className="bl-bar" style={{ width: `${Math.max(2, (agg.value[id] / max) * 100)}%`, opacity: i < input.advanceCount ? 1 : 0.45 }} />
+            </div>
+            <span className="bl-val">
+              {agg.value[id].toLocaleString('de-DE')} {agg.unit === 'Stimmen' && agg.value[id] === 1 ? 'Stimme' : agg.unit}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {clusters.map((cluster) => {
+        const isDone = !open.some((c) => c.length === cluster.length && c.every((x) => cluster.includes(x)));
+        return (
+          <div key={cluster.slice().sort().join('|')} className={`notice ${isDone ? 'ok' : 'warn'}`} style={{ marginTop: 12 }}>
+            <strong>Gleichstand ({agg.value[cluster[0]].toLocaleString('de-DE')} {agg.unit})</strong> an der Grenze – einigt euch auf
+            eine Reihenfolge:
+            <ol className="ranklist" style={{ marginTop: 8 }}>
+              {cluster.map((id, i) => (
+                <li key={id} className="rankitem" style={{ cursor: 'default' }}>
+                  <span className="place">{i + 1}.</span>
+                  <div className="meta">
+                    <div className="title">{label(id).title}</div>
+                  </div>
+                  <button className="btn icon small ghost" onClick={() => move(cluster, id, -1)} disabled={i === 0} aria-label="nach oben">
+                    ↑
+                  </button>
+                  <button className="btn icon small ghost" onClick={() => move(cluster, id, 1)} disabled={i === cluster.length - 1} aria-label="nach unten">
+                    ↓
+                  </button>
+                </li>
+              ))}
+            </ol>
+            {isDone ? (
+              <span>✓ Festgelegt</span>
+            ) : (
+              <button className="btn small primary" style={{ marginTop: 8 }} onClick={() => setResolved((r) => [...r, cluster])}>
+                So festlegen
+              </button>
+            )}
+          </div>
+        );
+      })}
+      <details style={{ marginTop: 12 }}>
+        <summary className="small">Einzelne Stimmen ansehen</summary>
+        <ul className="small plain" style={{ marginTop: 8 }}>
+          {votes.map((v) => (
+            <li key={v.player}>
+              <strong>{v.player}:</strong>{' '}
+              {v.selected
+                ? v.selected.map((id) => label(id).title).join(', ')
+                : v.order
+                  ? v.order.map((id, i) => `${i + 1}. ${label(id).title}`).join(' · ')
+                  : Object.entries(v.scores ?? {})
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([id, x]) => `${label(id).title} ${x}`)
+                      .join(' · ')}
+            </li>
+          ))}
+        </ul>
+      </details>
+      <DecisionBar ready={open.length === 0} confirmLabel="Gruppenergebnis bestätigen" onConfirm={() => onCommit(toDecision(finalOrder, agg, votes))}>
+        <button
+          className="btn small ghost"
+          onClick={() => {
+            setVotes([]);
+            setResolved([]);
+            setTieOrder({});
+            setHandover(false);
+          }}
+        >
+          Neu abstimmen
+        </button>
+      </DecisionBar>
     </section>
   );
 }

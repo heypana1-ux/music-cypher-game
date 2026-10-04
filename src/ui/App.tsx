@@ -5,11 +5,12 @@ import { Overview } from './Overview';
 import { Play } from './Play';
 import { Result } from './Result';
 import { Setup } from './Setup';
+import { StatsPage } from './Stats';
 import { StoreProvider, useStore } from './store';
 
 function Shell() {
   const { route, go, toastMsg, saveError, tournaments } = useStore();
-  const tid = 'id' in route ? route.id : null;
+  const tid = route.page !== 'stats' && 'id' in route ? route.id : null;
   const hasTournament = tid && tournaments.some((t) => t.id === tid);
   return (
     <>
@@ -24,6 +25,9 @@ function Shell() {
           </button>
           <button className="btn small ghost" aria-current={route.page === 'setup'} onClick={() => go({ page: 'setup' })}>
             Einstellungen
+          </button>
+          <button className="btn small ghost" aria-current={route.page === 'stats'} onClick={() => go({ page: 'stats' })}>
+            Statistik
           </button>
           {hasTournament && route.page !== 'play' && (
             <button className="btn small ghost" onClick={() => go({ page: 'play', id: tid })}>
@@ -49,6 +53,7 @@ function Shell() {
         {route.page === 'play' && <Play id={route.id} />}
         {route.page === 'overview' && <Overview id={route.id} />}
         {route.page === 'result' && <Result id={route.id} />}
+        {route.page === 'stats' && <StatsPage id={route.id} />}
       </main>
       <PlayerDock />
       {toastMsg && (

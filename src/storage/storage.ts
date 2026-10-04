@@ -2,11 +2,13 @@
 // Nothing here contains credentials – there are none in this app.
 
 import { computeState } from '../domain/engine';
+import type { Season } from '../domain/season';
 import type { Song, Tournament } from '../domain/types';
 
 const LIB_KEY = 'mc.library.v1';
 const TOURN_KEY = 'mc.tournaments.v1';
 const PREF_KEY = 'mc.prefs.v1';
+const SEASON_KEY = 'mc.seasons.v1';
 
 export interface ImportSummary {
   entries: number;
@@ -62,6 +64,15 @@ export function loadTournaments(): Tournament[] {
 
 export function saveTournaments(list: Tournament[]): string | null {
   return write(TOURN_KEY, list);
+}
+
+export function loadSeasons(): Season[] {
+  const list = read<Season[]>(SEASON_KEY, []);
+  return Array.isArray(list) ? list.filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string') : [];
+}
+
+export function saveSeasons(list: Season[]): string | null {
+  return write(SEASON_KEY, list);
 }
 
 export interface Prefs {

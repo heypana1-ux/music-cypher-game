@@ -301,7 +301,8 @@ export function evaluateMatch(
   const scores = d.scores ?? {};
   for (const id of ids) {
     const v = scores[id];
-    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 10) {
+    // Party mode stores averages (e.g. 7.33), so decimals are allowed within 1–10.
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 1 || v > 10) {
       return 'Jeder Song braucht eine Bewertung von 1 bis 10.';
     }
   }
@@ -564,10 +565,90 @@ function nextEntrants(ctx: Ctx, round: RoundState): string[] {
     const c = m.outcome!.candidate;
     if (c && winners.has(c)) out.push(c);
   }
-  if (ctx.config.format === 'cypher' && ctx.config.reshufflePerRound) {
-    return shuffle(out, mulberry32(deriveSeed(ctx.seed, `round-${round.index + 1}`)));
-  }
+  const mode = regroupMode(ctx.config);
+  if (mode === 'random') return shuffle(out, mulberry32(deriveSeed(ctx.seed, `round-${round.index + 1}`)));
+  if (mode === 'mix') return mixRegroup(round, out, ctx.config, mulberry32(deriveSeed(ctx.seed, `mix-${round.index + 1}`)));
   return out;
+}
+
+export function regroupMode(config: TournamentConfig): 'bracket' | 'mix' | 'random' {
+  if (config.format !== 'cypher') return 'bracket';
+  return config.regroup ?? (config.reshufflePerRound ? 'random' : 'bracket');
+}
+
+/**
+ * Mix: songs that just shared a group are spread over different groups next round, and group
+ * winners are spread so they don't all meet each other. Tier by placement (all 1st places, then
+ * all 2nd, …, extra spots last), shuffle inside each tier (seeded), deal round-robin into the
+ * next round's groups, then swap away remaining "same previous group" clashes where possible.
+ */
+function mixRegroup(round: RoundState, entrants: string[], config: TournamentConfig, rand: () => number): string[] {
+  const n = entrants.length;
+  if (n <= 4) return entrants;
+  const prevGroup = new Map<string, string>();
+  const tier = new Map<string, number>();
+  const extra = new Set(round.playoffs.flatMap((p) => p.winners));
+  for (const m of round.matches) {
+    for (const id of m.songIds) prevGroup.set(id, m.id);
+    const q = m.outcome?.order ? m.outcome.order.filter((x) => m.outcome!.qualified.includes(x)) : (m.outcome?.qualified ?? []);
+    q.forEach((id, i) => tier.set(id, m.kind === 'bye' ? 0 : i));
+  }
+  for (const id of extra) tier.set(id, 99);
+  const tiers = new Map<number, string[]>();
+  for (const id of entrants) {
+    const t = tier.get(id) ?? 50;
+    if (!tiers.has(t)) tiers.set(t, []);
+    tiers.get(t)!.push(id);
+  }
+  const ordered = [...tiers.keys()].sort((a, b) => a - b).flatMap((t) => shuffle(tiers.get(t)!, rand));
+  // slots of the next round's groups (same structure the engine will build)
+  const idx = Array.from({ length: n }, (_, i) => String(i));
+  const groups = cypherRoundGroups(idx, config.advancePerGroup).map((g) => g.songIds.map(Number));
+  const slots = groups.map(() => [] as number[]);
+  // deal round-robin into groups with free capacity
+  const cap = groups.map((g) => g.length);
+  let gi = 0;
+  const result = new Array<string>(n);
+  for (const id of ordered) {
+    let tries = 0;
+    while (slots[gi].length >= cap[gi] && tries++ < groups.length) gi = (gi + 1) % groups.length;
+    const pos = groups[gi][slots[gi].length];
+    slots[gi].push(pos);
+    result[pos] = id;
+    gi = (gi + 1) % groups.length;
+  }
+  // repair: avoid two songs from the same previous group in one new group
+  const clash = (g: number[]) => {
+    const seen = new Set<string>();
+    for (const p of g) {
+      const k = prevGroup.get(result[p]);
+      if (k && seen.has(k)) return true;
+      if (k) seen.add(k);
+    }
+    return false;
+  };
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    for (const g of groups) {
+      if (!clash(g)) continue;
+      outer: for (const a of g) {
+        for (const h of groups) {
+          if (h === g) continue;
+          for (const b of h) {
+            if ((tier.get(result[a]) ?? 50) !== (tier.get(result[b]) ?? 50)) continue; // keep the tier balance
+            [result[a], result[b]] = [result[b], result[a]];
+            if (!clash(g) && !clash(h)) {
+              changed = true;
+              break outer;
+            }
+            [result[a], result[b]] = [result[b], result[a]];
+          }
+        }
+      }
+    }
+    if (!changed) break;
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

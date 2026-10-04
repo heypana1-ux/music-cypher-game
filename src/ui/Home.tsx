@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react';
+import { participantMap } from '../domain/participants';
+import { seasonTable } from '../domain/season';
 import { computeState } from '../domain/engine';
 import { songLine } from '../domain/results';
 import type { Tournament } from '../domain/types';
@@ -6,10 +8,13 @@ import { demoSongs } from '../library/demo';
 import { mergeSongs } from '../library/importers';
 import { parseBackup } from '../storage/storage';
 import { fmtDate, Modal } from './common';
+import { useInstall } from './install';
 import { useStore } from './store';
 
 export function Home() {
-  const { tournaments, go, updateLibrary, library, saveTournament, deleteTournament, toast } = useStore();
+  const { tournaments, go, updateLibrary, library, saveTournament, deleteTournament, toast, seasons } = useStore();
+  const activeSeason = seasons.filter((x) => !x.closed).slice(-1)[0];
+  const seasonLeader = activeSeason ? seasonTable(activeSeason.id, tournaments).songs[0] : undefined;
   const [confirmDelete, setConfirmDelete] = useState<Tournament | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -57,6 +62,8 @@ export function Home() {
         </p>
       </section>
 
+      <InstallBanner />
+
       <div className="home-actions">
         <button className="action-tile primary" onClick={() => go({ page: 'library' })}>
           <strong>Neues Turnier</strong>
@@ -68,6 +75,22 @@ export function Home() {
           <strong>Demo ausprobieren</strong>
           <span className="muted small">24 erfundene Beispielsongs mit Demo-Klängen</span>
         </button>
+        {activeSeason && (
+          <button className="action-tile" onClick={() => go({ page: 'stats', id: activeSeason.id })}>
+            <strong>🏁 {activeSeason.name}</strong>
+            <span className="muted small">
+              {seasonLeader ? `Spitze: ${seasonLeader.entry.title} · ${seasonLeader.points} Punkte` : 'Noch kein Turnier gewertet'}
+            </span>
+          </button>
+        )}
+        {tournaments.length > 0 && (
+          <button className="action-tile" onClick={() => go({ page: 'stats' })}>
+            <strong>Statistiken</strong>
+            <span className="muted small">
+              {done.length} abgeschlossen · {running.length} laufend · Hall of Fame
+            </span>
+          </button>
+        )}
         <button className="action-tile" onClick={() => fileRef.current?.click()}>
           <strong>Sicherung laden</strong>
           <span className="muted small">Ein exportiertes Turnier wiederherstellen</span>
@@ -96,7 +119,7 @@ export function Home() {
                   <div className="grow">
                     <strong>{t.name}</strong>
                     <div className="small muted">
-                      {t.songs.length} Songs · {r ? `${r.label} · noch ${s.openItems.length} offen` : ''} · {fmtDate(t.updatedAt)}
+                      {t.draw.length} {t.artistMode ? 'Künstler' : 'Songs'} · {r ? `${r.label} · noch ${s.openItems.length} offen` : ''} · {fmtDate(t.updatedAt)}
                     </div>
                   </div>
                   <button className="btn primary small" onClick={() => go({ page: 'play', id: t.id })}>
@@ -124,7 +147,7 @@ export function Home() {
                 <div className="grow">
                   <strong>{t.name}</strong>
                   <div className="small muted">
-                    🏆 {songLine(t.songs.find((x) => x.id === s.champion))} · {t.songs.length} Songs · {fmtDate(t.updatedAt)}
+                    🏆 {songLine(participantMap(t).get(s.champion!))} · {t.draw.length} {t.artistMode ? 'Künstler' : 'Songs'} · {fmtDate(t.updatedAt)}
                   </div>
                 </div>
                 <button className="btn small" onClick={() => go({ page: 'result', id: t.id })}>
@@ -173,5 +196,46 @@ export function Home() {
         </Modal>
       )}
     </div>
+  );
+}
+
+function InstallBanner() {
+  const inst = useInstall();
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem('mc.installDismissed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  if (hidden || inst.standalone || (!inst.canPrompt && !inst.ios)) return null;
+  const dismiss = () => {
+    setHidden(true);
+    try {
+      localStorage.setItem('mc.installDismissed', '1');
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <section className="card soft install-banner">
+      <img src="./icons/icon-192.png" alt="" width={48} height={48} style={{ borderRadius: 12 }} />
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <strong>Music Cypher als App</strong>
+        <div className="small muted">
+          {inst.canPrompt
+            ? 'Auf den Homescreen legen – startet im Vollbild und funktioniert auch offline.'
+            : 'Im Safari unten auf „Teilen“ (□↑) tippen und „Zum Home-Bildschirm“ wählen.'}
+        </div>
+      </div>
+      {inst.canPrompt && (
+        <button className="btn primary" onClick={() => void inst.install()}>
+          Installieren
+        </button>
+      )}
+      <button className="btn small ghost" onClick={dismiss}>
+        Nicht jetzt
+      </button>
+    </section>
   );
 }

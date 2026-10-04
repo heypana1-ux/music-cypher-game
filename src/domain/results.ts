@@ -1,4 +1,5 @@
 import type { MatchState, PlayoffState, RoundState, Song, Tournament, TournamentState } from './types';
+import { participantMap } from './participants';
 
 export interface PathStep {
   round: RoundState;
@@ -69,7 +70,7 @@ export function songLine(s: Song | undefined): string {
 
 /** A readable export of the result (no credentials, no audio). */
 export function resultExport(t: Tournament, state: TournamentState) {
-  const byId = new Map(t.songs.map((s) => [s.id, s]));
+  const byId = participantMap(t);
   const brief = (id: string | null) => {
     const s = id ? byId.get(id) : undefined;
     return s ? { id: s.id, title: s.title, artists: s.artists, album: s.album ?? null } : null;
@@ -104,4 +105,28 @@ export function resultExport(t: Tournament, state: TournamentState) {
     })),
     note: 'Ergebnis deiner persönlichen Entscheidungen. Auslosung, Freilose und Gruppen beeinflussen den Verlauf – keine objektive Rangliste.',
   };
+}
+
+/**
+ * Songs in the order the tournament actually determined them: champion, runner-up,
+ * (third place / final order), then by elimination stage, latest stage first.
+ * Within one stage songs stay grouped – the list order there is not a ranking.
+ */
+export function resultOrder(state: TournamentState): Array<{ songId: string; stage: string }> {
+  const out: Array<{ songId: string; stage: string }> = [];
+  const seen = new Set<string>();
+  const push = (id: string | null, stage: string) => {
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      out.push({ songId: id, stage });
+    }
+  };
+  push(state.champion, 'Sieger');
+  const finalRound = state.rounds[state.rounds.length - 1];
+  const fin = finalRound?.matches.find((m) => m.kind === 'final');
+  if (fin?.outcome?.order) fin.outcome.order.forEach((id, i) => push(id, `Finale · Platz ${i + 1}`));
+  push(state.runnerUp, 'Finale');
+  push(state.thirdPlace, 'Platz 3');
+  for (const g of eliminationGroups(state)) for (const id of g.songIds) push(id, g.label);
+  return out;
 }

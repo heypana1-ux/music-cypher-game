@@ -27,7 +27,7 @@ export function spotifyEmbedUrl(id: string): string {
  */
 export function playbackFor(song: Song, localAudio: ReadonlySet<string>): PlaybackInfo {
   const spotifyUrl = song.spotifyTrackId ? spotifyTrackUrl(song.spotifyTrackId) : undefined;
-  if (localAudio.has(song.id)) return { kind: 'local', label: 'Eigene Audiodatei', controllable: true, spotifyUrl };
+  if (localAudio.has(song.audioKey ?? song.id)) return { kind: 'local', label: 'Eigene Audiodatei', controllable: true, spotifyUrl };
   if (song.audioUrl) return { kind: 'url', label: 'Eigene Audio-URL', controllable: true, spotifyUrl };
   if (song.demoTone) return { kind: 'demo', label: 'Demo-Klang', controllable: true };
   if (song.spotifyTrackId) return { kind: 'spotify', label: 'Spotify-Player', controllable: false, spotifyUrl };

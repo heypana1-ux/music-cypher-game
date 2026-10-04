@@ -72,7 +72,7 @@ export function PlaybackChip({ song }: { song: Song }) {
   return <span className={cls}>{info.kind === 'none' ? '⊘ ' : '♪ '}{info.label}</span>;
 }
 
-export function PlayButton({ song, compact = false }: { song: Song; compact?: boolean }) {
+export function PlayButton({ song, compact = false, label: name }: { song: Song; compact?: boolean; label?: string }) {
   const p = usePlayer();
   const { localAudio } = useStore();
   const info = playbackFor(song, localAudio);
@@ -91,7 +91,7 @@ export function PlayButton({ song, compact = false }: { song: Song; compact?: bo
       className={`btn ${compact ? 'small' : ''}`}
       onClick={() => player.toggle(song)}
       aria-pressed={active}
-      aria-label={`${label}: ${song.title}`}
+      aria-label={`${label}: ${name ?? song.title}`}
     >
       <span aria-hidden="true">{playing && info.kind !== 'spotify' ? '❚❚' : '▶'}</span> {label}
     </button>
@@ -101,35 +101,39 @@ export function PlayButton({ song, compact = false }: { song: Song; compact?: bo
 export function PlayerDock() {
   const p = usePlayer();
   const ref = useRef<HTMLDivElement>(null);
+  const hasSong = !!p.song;
   useEffect(() => {
-    const h = p.song ? (ref.current?.offsetHeight ?? 0) : 0;
-    document.documentElement.style.setProperty('--dock-h', `${h}px`);
-    document.body.classList.toggle('has-dock', !!p.song);
-  }, [p.song, p.kind]);
+    const setH = () => {
+      const h = hasSong ? (ref.current?.offsetHeight ?? 0) : 0;
+      document.documentElement.style.setProperty('--dock-h', `${h}px`);
+    };
+    document.body.classList.toggle('has-dock', hasSong);
+    setH();
+    if (!hasSong || !ref.current || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(setH);
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, [hasSong]);
   if (!p.song) return null;
   const s = p.song;
+  const masked = p.mask?.[s.id];
   const snippetEnd = p.snippetStart + SNIPPET_SECONDS;
   return (
-    <div className="dock" ref={ref} role="region" aria-label="Wiedergabe">
+    <div className={`dock ${p.kind === 'spotify' ? 'is-embed' : ''}`} ref={ref} role="region" aria-label="Wiedergabe">
       <div className="dock-inner">
-        <Cover song={s} size={48} />
+        {masked ? <div className="cover blind-cover" style={{ width: 48, height: 48 }} aria-hidden="true" /> : <Cover song={s} size={48} />}
         <div className="meta">
-          <div className="title">{s.title}</div>
-          <div className="small muted">{artistsOf(s)}</div>
+          <div className="title">{masked ?? s.title}</div>
+          <div className="small muted">{masked ? 'verdeckt' : artistsOf(s)}</div>
         </div>
         {p.kind === 'spotify' && s.spotifyTrackId ? (
-          <>
-            <iframe
-              key={s.spotifyTrackId}
-              title={`Spotify-Player: ${s.title}`}
-              src={spotifyEmbedUrl(s.spotifyTrackId)}
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-            />
-            <span className="tiny muted" style={{ maxWidth: 220 }}>
-              Offizieller Spotify-Player. Mit Premium-Login im Browser meist ganzer Song, sonst Vorschau.
-            </span>
-          </>
+          <iframe
+            key={s.spotifyTrackId}
+            title={`Spotify-Player: ${s.title}`}
+            src={spotifyEmbedUrl(s.spotifyTrackId)}
+            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+            loading="lazy"
+          />
         ) : p.status === 'error' ? (
           <span className="small" style={{ color: 'var(--warn)' }}>{p.error}</span>
         ) : (
