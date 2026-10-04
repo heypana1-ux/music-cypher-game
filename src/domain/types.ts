@@ -118,6 +118,8 @@ export interface Tournament {
    * Then `draw` and all decisions use participant IDs ("ar:…"), `songs` holds the real songs.
    */
   artistMode?: { participants: ArtistParticipant[] };
+  /** Season this tournament counts for. */
+  seasonId?: string;
 }
 
 export interface ArtistParticipant {

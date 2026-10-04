@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { participantMap } from '../domain/participants';
+import { seasonTable } from '../domain/season';
 import { computeState } from '../domain/engine';
 import { songLine } from '../domain/results';
 import type { Tournament } from '../domain/types';
@@ -11,7 +12,9 @@ import { useInstall } from './install';
 import { useStore } from './store';
 
 export function Home() {
-  const { tournaments, go, updateLibrary, library, saveTournament, deleteTournament, toast } = useStore();
+  const { tournaments, go, updateLibrary, library, saveTournament, deleteTournament, toast, seasons } = useStore();
+  const activeSeason = seasons.filter((x) => !x.closed).slice(-1)[0];
+  const seasonLeader = activeSeason ? seasonTable(activeSeason.id, tournaments).songs[0] : undefined;
   const [confirmDelete, setConfirmDelete] = useState<Tournament | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -72,6 +75,14 @@ export function Home() {
           <strong>Demo ausprobieren</strong>
           <span className="muted small">24 erfundene Beispielsongs mit Demo-Klängen</span>
         </button>
+        {activeSeason && (
+          <button className="action-tile" onClick={() => go({ page: 'stats', id: activeSeason.id })}>
+            <strong>🏁 {activeSeason.name}</strong>
+            <span className="muted small">
+              {seasonLeader ? `Spitze: ${seasonLeader.entry.title} · ${seasonLeader.points} Punkte` : 'Noch kein Turnier gewertet'}
+            </span>
+          </button>
+        )}
         {tournaments.length > 0 && (
           <button className="action-tile" onClick={() => go({ page: 'stats' })}>
             <strong>Statistiken</strong>

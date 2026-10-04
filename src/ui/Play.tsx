@@ -3,7 +3,7 @@ import { addDecision, computeState, findMatch, findPlayoff, relevantTies, roundO
 import { roundEntries, unitize } from '../domain/participants';
 import { newId } from '../domain/rng';
 import { aggregateVotes, applyTieOrder, type AggregateInput } from '../domain/party';
-import { computeRatings } from '../domain/rating';
+import { computeRatings, headToHeadFor, ratingInsights, type HeadToHead } from '../domain/rating';
 import { pct, songHistoryIndex } from '../domain/stats';
 import type { Decision, MatchState, PartyVote, PlayoffState, RoundState, Song, Tournament, TournamentState } from '../domain/types';
 import { player, usePlayer } from '../playback/player';
@@ -22,6 +22,8 @@ interface Label {
 }
 /** Hide earlier scores/places (blind mode or the "frühere Punkte ausblenden" option). */
 const HidePastCtx = createContext(false);
+/** Head-to-head records from all tournaments (including earlier rounds of this one). */
+const H2HCtx = createContext<Map<string, HeadToHead>>(new Map());
 const LabelCtx = createContext<(id: string) => Label>(() => ({ title: '', artists: '', song: undefined, hidden: false }));
 const useLabel = () => useContext(LabelCtx);
 
@@ -124,6 +126,9 @@ export function Play({ id }: { id: string }) {
   const t = tournaments.find((x) => x.id === id);
   const state = useMemo(() => (t ? computeState(t) : null), [t]);
   const songInfo = useSongInfo(t, state, tournaments);
+  const h2hKey = tournaments.map((x) => x.id + x.updatedAt + x.decisions.length).join('|');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const h2h = useMemo(() => ratingInsights(tournaments).h2h, [h2hKey]);
   const [focus, setFocus] = useState<string | null>(null);
   const [justDecided, setJustDecided] = useState<string | null>(null);
   const [confirmUndo, setConfirmUndo] = useState(false);
@@ -288,6 +293,7 @@ export function Play({ id }: { id: string }) {
 
   return (
     <SongInfoCtx.Provider value={songInfo}>
+    <H2HCtx.Provider value={h2h}>
     <HidePastCtx.Provider value={!!(t.config.blindMode || t.config.hidePastScores)}>
     <LabelCtx.Provider value={realLabels(songs)}>
     <div className="stack">
@@ -343,6 +349,7 @@ export function Play({ id }: { id: string }) {
     </div>
     </LabelCtx.Provider>
     </HidePastCtx.Provider>
+    </H2HCtx.Provider>
     </SongInfoCtx.Provider>
   );
 }
@@ -501,8 +508,42 @@ function MatchBoard(props: BoardProps & { match: MatchState }) {
             : `Bewerte jeden Song von 1 bis 10. ${isFinal ? 'Die beste Bewertung gewinnt.' : `Die besten ${match.advanceCount} kommen weiter.`}`}{' '}
         <span className="faint">Tasten 1–{list.length} spielen die Songs ab.</span>
       </p>
+      {!props.t.config.blindMode && !props.t.config.hidePastScores && <HeadToHeadPanel list={list} />}
       {board}
     </div>
+  );
+}
+
+/** Earlier meetings of the songs in this encounter – closed by default so nobody is nudged. */
+function HeadToHeadPanel({ list }: { list: Song[] }) {
+  const h2h = useContext(H2HCtx);
+  const ids = list.map((s) => s.audioKey ?? s.id);
+  const records = headToHeadFor(h2h, ids);
+  if (!records.length) return null;
+  const meetings = records.reduce((k, h) => k + h.meetings.length, 0);
+  return (
+    <details className="h2h-panel">
+      <summary>
+        🤝 Head-to-Head · {records.length === 1 ? 'diese Songs kennen sich' : `${records.length} Paarungen kennen sich`} ({meetings}{' '}
+        {meetings === 1 ? 'Begegnung' : 'Begegnungen'})
+      </summary>
+      <ul className="plain small">
+        {records.map((h) => {
+          const last = h.meetings[h.meetings.length - 1];
+          return (
+            <li key={h.a.id + h.b.id}>
+              {h.a.title} <strong>{h.winsA}</strong> : <strong>{h.winsB}</strong> {h.b.title}
+              {h.draws ? <span className="muted"> ({h.draws}× gleich)</span> : null}
+              <span className="muted">
+                {' '}
+                · zuletzt: {last.winner === null ? 'unentschieden' : `${last.winner === h.a.id ? h.a.title : h.b.title} vorn`} ({last.label},{' '}
+                {last.tournamentName})
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }
 

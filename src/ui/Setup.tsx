@@ -9,7 +9,10 @@ import { Seg } from './common';
 import { useStore } from './store';
 
 export function Setup() {
-  const { library, setupConfig, setSetupConfig, saveTournament, go, localAudio } = useStore();
+  const { library, setupConfig, setSetupConfig, saveTournament, go, localAudio, seasons, saveSeason } = useStore();
+  const openSeasons = seasons.filter((x) => !x.closed);
+  const [seasonChoice, setSeasonChoice] = useState<string>(() => openSeasons[openSeasons.length - 1]?.id ?? '');
+  const [newSeasonName, setNewSeasonName] = useState('');
   const [name, setName] = useState(() => `Turnier vom ${new Date().toLocaleDateString('de-DE')}`);
   const [starting, setStarting] = useState(false);
   const config = setupConfig;
@@ -82,7 +85,13 @@ export function Setup() {
       postponed: [],
       sourceInfo: library.summary.sources.join(', '),
       artistMode,
+      seasonId: undefined,
     };
+    if (seasonChoice === 'new') {
+      const season = { id: newId('se-'), name: newSeasonName.trim() || `Saison ${seasons.length + 1}`, createdAt: now };
+      saveSeason(season);
+      t.seasonId = season.id;
+    } else if (seasonChoice) t.seasonId = seasonChoice;
     saveTournament(t);
     go({ page: 'play', id: t.id });
   };
@@ -532,6 +541,24 @@ export function Setup() {
             Name des Turniers
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
           </label>
+          <label className="field" style={{ minWidth: 200 }}>
+            Saison
+            <select value={seasonChoice} onChange={(e) => setSeasonChoice(e.target.value)}>
+              <option value="">Keine Saison</option>
+              {openSeasons.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+              <option value="new">+ Neue Saison …</option>
+            </select>
+          </label>
+          {seasonChoice === 'new' && (
+            <label className="field" style={{ minWidth: 180 }}>
+              Name der Saison
+              <input type="text" value={newSeasonName} placeholder={`Saison ${seasons.length + 1}`} onChange={(e) => setNewSeasonName(e.target.value)} />
+            </label>
+          )}
           <button className="btn primary big" onClick={start} disabled={starting || check.errors.length > 0} style={{ alignSelf: 'flex-end' }}>
             Turnier starten
           </button>

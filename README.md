@@ -67,6 +67,14 @@ Eine austauschbare Schnittstelle für Quellen ist vorbereitet (`src/playback/sou
   - Die Song-Reihenfolge ist zufällig oder folgt der Import-Reihenfolge.
   - Das Gesamt-Rating bewertet die tatsächlich gespielten Songs.
 
+- **Underdogs & Überraschungen:**
+  - **Überraschungen:** Ein Song gewinnt eine Begegnung gegen einen Song, der zu diesem Zeitpunkt höher bewertet war.
+  - **Underdogs:** Songs, die vor dem Turnier weit unten im Rating standen und dann weit kamen.
+  - **Gestolperte Favoriten:** das Gegenstück dazu.
+  - **Rivalitäten:** Songs, die sich mehrfach begegnet sind, mit Bilanz.
+- **Head-to-Head:** In jeder Begegnung lässt sich aufklappen, wie die Songs früher gegeneinander abgeschnitten haben. Die Bilanz ist standardmäßig zugeklappt und wird im Blind-Modus oder bei ausgeblendeten Punkten gar nicht gezeigt.
+- **Saison-Modus:** Mehrere Turniere zählen für eine gemeinsame Tabelle. Punkte gibt es so: Teilnahme 1, je überstandene Runde 2, Finale +3, Sieg +5. Dazu kommen Podium, Formkurve der letzten Turniere und Interpreten-Wertung. Beim Start wählst du die Saison oder fügst Turniere später hinzu.
+
 ## Architektur
 
 React + TypeScript + Vite. Der Stack ist schlank, typsicher und braucht kein Backend.

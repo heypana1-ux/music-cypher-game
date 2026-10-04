@@ -1,12 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { defaultConfig } from '../domain/config';
+import type { Season } from '../domain/season';
 import type { Tournament, TournamentConfig } from '../domain/types';
 import { listAudioIds } from '../playback/audioStore';
 import { player } from '../playback/player';
 import {
   loadLibrary,
+  loadSeasons,
   loadTournaments,
   saveLibrary,
+  saveSeasons,
   saveTournaments,
   type LibraryState,
 } from '../storage/storage';
@@ -60,6 +63,9 @@ interface Store {
   tournaments: Tournament[];
   saveTournament: (t: Tournament) => void;
   deleteTournament: (id: string) => void;
+  seasons: Season[];
+  saveSeason: (s: Season) => void;
+  deleteSeason: (id: string) => void;
   localAudio: Set<string>;
   refreshLocalAudio: () => Promise<void>;
   setupConfig: TournamentConfig;
@@ -82,6 +88,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [library, setLibrary] = useState<LibraryState>(loadLibrary);
   const [tournaments, setTournaments] = useState<Tournament[]>(loadTournaments);
   const [localAudio, setLocalAudio] = useState<Set<string>>(new Set());
+  const [seasons, setSeasons] = useState<Season[]>(loadSeasons);
   const [setupConfig, setSetupConfig] = useState<TournamentConfig>(defaultConfig);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -135,6 +142,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const saveSeason = useCallback((s: Season) => {
+    setSeasons((prev) => {
+      const next = prev.some((x) => x.id === s.id) ? prev.map((x) => (x.id === s.id ? s : x)) : [...prev, s];
+      setSaveError(saveSeasons(next));
+      return next;
+    });
+  }, []);
+
+  /** Deleting a season keeps its tournaments – they just no longer count for it. */
+  const deleteSeason = useCallback((id: string) => {
+    setSeasons((prev) => {
+      const next = prev.filter((x) => x.id !== id);
+      setSaveError(saveSeasons(next));
+      return next;
+    });
+    setTournaments((prev) => {
+      const next = prev.map((t) => (t.seasonId === id ? { ...t, seasonId: undefined } : t));
+      setSaveError(saveTournaments(next));
+      return next;
+    });
+  }, []);
+
   const toast = useCallback((msg: string) => {
     setToastMsg(msg);
     window.clearTimeout(toastTimer.current);
@@ -150,6 +179,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tournaments,
       saveTournament,
       deleteTournament,
+      seasons,
+      saveSeason,
+      deleteSeason,
       localAudio,
       refreshLocalAudio,
       setupConfig,
@@ -158,7 +190,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       toastMsg,
       saveError,
     }),
-    [route, go, library, updateLibrary, tournaments, saveTournament, deleteTournament, localAudio, refreshLocalAudio, setupConfig, toast, toastMsg, saveError],
+    [route, go, library, updateLibrary, tournaments, saveTournament, deleteTournament, seasons, saveSeason, deleteSeason, localAudio, refreshLocalAudio, setupConfig, toast, toastMsg, saveError],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

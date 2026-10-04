@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { participantMap } from '../domain/participants';
 import { computeState } from '../domain/engine';
 import {
+  songRuns,
   overallStats,
   pct,
   tournamentStats,
@@ -9,10 +10,12 @@ import {
   type SongLine,
   type TournamentStats,
 } from '../domain/stats';
-import { computeRatings, START_RATING, type SongRating } from '../domain/rating';
+import { computeRatings, ratingInsights, START_RATING, tournamentSurprises, type HeadToHead, type SongRating } from '../domain/rating';
+import { newId } from '../domain/rng';
+import { SEASON_RULES, seasonTable, type Season } from '../domain/season';
 import type { Tournament } from '../domain/types';
 import { SpotifyExportModal } from './ShareTools';
-import { artistsOf, Cover, fmtDate } from './common';
+import { artistsOf, Cover, fmtDate, Modal } from './common';
 import { useStore } from './store';
 
 const fmt1 = (x: number | null) => (x === null ? '–' : x.toFixed(1).replace('.', ','));
@@ -320,6 +323,8 @@ export function TournamentStatsView({ t, compact = false }: { t: Tournament; com
         </div>
       )}
 
+      <TournamentUpsets t={t} />
+
       {!compact && (
         <>
           <section className="card">
@@ -346,8 +351,9 @@ export function TournamentStatsView({ t, compact = false }: { t: Tournament; com
 type Metric = 'titles' | 'winRate' | 'avgProgress' | 'songs';
 
 export function StatsPage({ id }: { id?: string }) {
-  const { tournaments, go } = useStore();
-  const selected = id ? tournaments.find((t) => t.id === id) : undefined;
+  const { tournaments, go, seasons, saveSeason } = useStore();
+  const selectedSeason = id?.startsWith('se-') ? seasons.find((x) => x.id === id) : undefined;
+  const selected = id && !selectedSeason ? tournaments.find((t) => t.id === id) : undefined;
   const o = useMemo(() => overallStats(tournaments), [tournaments]);
   const [metric, setMetric] = useState<Metric>('winRate');
   const [minEnc, setMinEnc] = useState(3);
@@ -385,8 +391,29 @@ export function StatsPage({ id }: { id?: string }) {
         </p>
       </div>
       <div className="round-tabs" role="tablist" aria-label="Statistik-Bereich">
-        <button role="tab" aria-selected={!selected} className={`btn small ${!selected ? 'primary' : ''}`} onClick={() => go({ page: 'stats' })}>
+        <button role="tab" aria-selected={!selected && !selectedSeason} className={`btn small ${!selected && !selectedSeason ? 'primary' : ''}`} onClick={() => go({ page: 'stats' })}>
           Gesamt
+        </button>
+        {seasons.map((x) => (
+          <button
+            key={x.id}
+            role="tab"
+            aria-selected={selectedSeason?.id === x.id}
+            className={`btn small ${selectedSeason?.id === x.id ? 'primary' : ''}`}
+            onClick={() => go({ page: 'stats', id: x.id })}
+          >
+            🏁 {x.name}
+          </button>
+        ))}
+        <button
+          className="btn small ghost"
+          onClick={() => {
+            const season: Season = { id: newId('se-'), name: `Saison ${seasons.length + 1}`, createdAt: new Date().toISOString() };
+            saveSeason(season);
+            go({ page: 'stats', id: season.id });
+          }}
+        >
+          + Saison
         </button>
         {tournaments.map((t) => {
           const fin = computeState(t).finished;
@@ -405,7 +432,9 @@ export function StatsPage({ id }: { id?: string }) {
         })}
       </div>
 
-      {selected ? (
+      {selectedSeason ? (
+        <SeasonView season={selectedSeason} />
+      ) : selected ? (
         <>
           <div className="row">
             <h2 style={{ margin: 0 }}>{selected.name}</h2>
@@ -466,6 +495,7 @@ export function StatsPage({ id }: { id?: string }) {
           </section>
 
           <RatingSection ratings={ratings} onExport={() => setExportRatings(true)} />
+          <SurpriseSection />
           {exportRatings && (
             <SpotifyExportModal
               title="Gesamt-Rating nach Spotify"
@@ -630,4 +660,380 @@ function Delta({ d }: { d: number }) {
   const v = Math.round(d);
   if (!v) return <span className="faint">±0</span>;
   return <span style={{ color: v > 0 ? 'var(--accent)' : 'var(--danger)' }}>{v > 0 ? `▲ +${v}` : `▼ ${v}`}</span>;
+}
+
+// ---------------------------------------------------------------------------
+// Underdogs, upsets, rivalries
+
+function songCell(song: { title: string; artists: string[] } & Parameters<typeof Cover>[0]['song']) {
+  return (
+    <span className="cell-song">
+      <Cover song={song} size={32} />
+      <span>
+        <strong>{song!.title}</strong>
+        <span className="tiny muted"> {artistsOf(song)}</span>
+      </span>
+    </span>
+  );
+}
+
+function SurpriseSection() {
+  const { tournaments, go } = useStore();
+  const insights = useMemo(() => ratingInsights(tournaments), [tournaments]);
+  const surprises = useMemo(() => tournamentSurprises(tournaments, (t) => songRuns(t)), [tournaments]);
+  const rivalries = useMemo(
+    () =>
+      [...insights.h2h.values()]
+        .filter((h) => h.meetings.length >= 2)
+        .sort((a, b) => b.meetings.length - a.meetings.length || Math.abs(a.winsA - a.winsB) - Math.abs(b.winsA - b.winsB))
+        .slice(0, 8),
+    [insights],
+  );
+  const [h2hOpen, setH2hOpen] = useState<HeadToHead | null>(null);
+  const empty = !insights.upsets.length && !surprises.underdogs.length && !surprises.flops.length && !rivalries.length;
+  return (
+    <section className="card">
+      <h3>Underdogs & Überraschungen</h3>
+      <p className="tiny muted">
+        Grundlage ist das Gesamt-Rating zum jeweiligen Zeitpunkt: Wer gewinnt gegen einen höher bewerteten Song, sorgt für eine
+        Überraschung. Underdogs und gestolperte Favoriten vergleichen das Turnierergebnis mit der Rangfolge vor dem Turnier
+        (nur Songs mit mindestens zwei früheren Vergleichen).
+      </p>
+      {empty ? (
+        <p className="muted small">Noch zu wenige Turniere – nach zwei, drei Turnieren mit gleichen Songs wird es hier spannend.</p>
+      ) : (
+        <div className="grid-2">
+          <div>
+            <h4 className="subhead">🐶 Underdogs</h4>
+            {surprises.underdogs.length ? (
+              <ul className="plain small">
+                {surprises.underdogs.slice(0, 6).map((u) => (
+                  <li key={u.tournament.id + u.song.id}>
+                    <button className="linkish" onClick={() => go({ page: 'result', id: u.tournament.id })}>
+                      <strong>{u.song.title}</strong>
+                    </button>{' '}
+                    <span className="muted">
+                      – vorher Platz {u.preRank} von {u.rated} ({Math.round(u.preRating)}), dann <strong style={{ color: 'var(--accent)' }}>{u.stage}</strong> ·{' '}
+                      {u.tournament.name}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted small">Noch keine.</p>
+            )}
+            <h4 className="subhead">📉 Gestolperte Favoriten</h4>
+            {surprises.flops.length ? (
+              <ul className="plain small">
+                {surprises.flops.slice(0, 6).map((u) => (
+                  <li key={u.tournament.id + u.song.id}>
+                    <strong>{u.song.title}</strong>{' '}
+                    <span className="muted">
+                      – vorher Platz {u.preRank} von {u.rated} ({Math.round(u.preRating)}), dann <strong style={{ color: 'var(--danger)' }}>{u.stage}</strong> ·{' '}
+                      {u.tournament.name}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted small">Noch keine.</p>
+            )}
+          </div>
+          <div>
+            <h4 className="subhead">⚡ Größte Überraschungen in Begegnungen</h4>
+            {insights.upsets.length ? (
+              <ul className="plain small">
+                {insights.upsets.slice(0, 8).map((u, i) => (
+                  <li key={i}>
+                    <strong>{u.winner.title}</strong> schlägt <strong>{u.loser.title}</strong>{' '}
+                    <span className="muted">
+                      · {Math.round(u.winnerRating)} gegen {Math.round(u.loserRating)} (+{Math.round(u.gap)}) · {u.label} · {u.tournamentName}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted small">Noch keine.</p>
+            )}
+            <h4 className="subhead">🤝 Rivalitäten</h4>
+            {rivalries.length ? (
+              <ul className="plain small">
+                {rivalries.map((h) => (
+                  <li key={h.a.id + h.b.id}>
+                    <button className="linkish" onClick={() => setH2hOpen(h)}>
+                      {h.a.title} <strong>{h.winsA}</strong> : <strong>{h.winsB}</strong> {h.b.title}
+                    </button>
+                    <span className="muted"> · {h.meetings.length}× getroffen{h.draws ? `, ${h.draws}× gleich` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted small">Noch keine Songs, die sich mehrfach begegnet sind.</p>
+            )}
+          </div>
+        </div>
+      )}
+      {h2hOpen && <H2HModal h={h2hOpen} onClose={() => setH2hOpen(null)} />}
+    </section>
+  );
+}
+
+export function H2HModal({ h, onClose }: { h: HeadToHead; onClose: () => void }) {
+  return (
+    <Modal
+      title="Head-to-Head"
+      onClose={onClose}
+      actions={
+        <button className="btn primary" onClick={onClose}>
+          Schließen
+        </button>
+      }
+    >
+      <div className="h2h-head">
+        <div>{songCell(h.a)}</div>
+        <div className="h2h-score">
+          {h.winsA} : {h.winsB}
+          {h.draws ? <span className="tiny muted"> ({h.draws}× gleich)</span> : null}
+        </div>
+        <div>{songCell(h.b)}</div>
+      </div>
+      <ul className="plain small">
+        {h.meetings
+          .slice()
+          .reverse()
+          .map((m, i) => (
+            <li key={i}>
+              {m.winner === null ? 'Unentschieden' : <strong>{m.winner === h.a.id ? h.a.title : h.b.title}</strong>}
+              <span className="muted">
+                {' '}
+                · {m.label} · {m.tournamentName} · {fmtDate(m.at)}
+              </span>
+            </li>
+          ))}
+      </ul>
+    </Modal>
+  );
+}
+
+function TournamentUpsets({ t }: { t: Tournament }) {
+  const { tournaments } = useStore();
+  const upsets = useMemo(() => ratingInsights(tournaments).upsets.filter((u) => u.tournamentId === t.id), [tournaments, t.id]);
+  if (!upsets.length) return null;
+  return (
+    <section className="card">
+      <h3>⚡ Überraschungen in diesem Turnier</h3>
+      <ul className="plain small">
+        {upsets.slice(0, 6).map((u, i) => (
+          <li key={i}>
+            <strong>{u.winner.title}</strong> schlägt <strong>{u.loser.title}</strong>{' '}
+            <span className="muted">
+              · Rating {Math.round(u.winnerRating)} gegen {Math.round(u.loserRating)} · {u.label}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Season
+
+function SeasonView({ season }: { season: Season }) {
+  const { tournaments, saveSeason, deleteSeason, saveTournament, go, toast } = useStore();
+  const table = useMemo(() => seasonTable(season.id, tournaments), [season.id, tournaments]);
+  const [name, setName] = useState(season.name);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [add, setAdd] = useState('');
+  const free = tournaments.filter((t) => !t.seasonId);
+  const leader = table.songs[0];
+  const podium = table.songs.slice(0, 3);
+  const songRows = table.songs.filter((l) => !l.entry.id.startsWith('ar:'));
+  const artistEntries = table.songs.filter((l) => l.entry.id.startsWith('ar:'));
+
+  return (
+    <div className="stack">
+      <section className="card">
+        <div className="row">
+          <input
+            type="text"
+            value={name}
+            aria-label="Name der Saison"
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => name.trim() && name !== season.name && saveSeason({ ...season, name: name.trim() })}
+            style={{ flex: 1, minWidth: 200, fontSize: '1.3rem', fontWeight: 800 }}
+          />
+          {season.closed ? <span className="chip">abgeschlossen</span> : <span className="chip accent">läuft</span>}
+          <button className="btn small" onClick={() => saveSeason({ ...season, closed: !season.closed })}>
+            {season.closed ? 'Wieder öffnen' : 'Saison abschließen'}
+          </button>
+          <button className="btn small ghost danger" onClick={() => setConfirmDelete(true)}>
+            Löschen
+          </button>
+        </div>
+        <p className="tiny muted" style={{ marginBottom: 0 }}>
+          Punkte: {SEASON_RULES}. Es zählen nur abgeschlossene Turniere.
+        </p>
+      </section>
+
+      <Tiles
+        items={[
+          { label: 'Turniere gewertet', value: table.finished.length, hl: true },
+          { label: 'laufen noch', value: table.running.length },
+          { label: 'Songs mit Punkten', value: table.songs.length },
+          ...(leader ? [{ label: season.closed ? 'Saison-Champion' : 'Spitzenreiter', value: leader.entry.title }] : []),
+        ]}
+      />
+
+      {podium.length > 0 && (
+        <section className="card">
+          <h3>{season.closed ? '🏆 Saison-Podium' : 'Aktuelle Spitze'}</h3>
+          <div className="podium">
+            {podium.map((l, i) => (
+              <div key={l.entry.id} className={`podium-item p${i + 1}`}>
+                <div className="podium-rank">{i + 1}</div>
+                <Cover song={l.entry} size={64} />
+                <strong>{l.entry.title}</strong>
+                <span className="tiny muted">{artistsOf(l.entry)}</span>
+                <span className="podium-pts">{l.points} Punkte</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="card">
+        <h3>Tabelle</h3>
+        {table.songs.length === 0 ? (
+          <p className="muted small">Noch kein abgeschlossenes Turnier in dieser Saison.</p>
+        ) : (
+          <SortTable
+            rows={[...songRows, ...artistEntries]}
+            initial="points"
+            rowKey={(l) => l.entry.id}
+            limit={30}
+            cols={[
+              { key: 'rank', label: '#', value: (l) => table.songs.indexOf(l) + 1, num: true },
+              { key: 'title', label: 'Song / Künstler', value: (l) => l.entry.title, render: (l) => songCell(l.entry) },
+              { key: 'points', label: 'Punkte', value: (l) => l.points, render: (l) => <strong>{l.points}</strong>, num: true },
+              { key: 'tournaments', label: 'Turniere', value: (l) => l.tournaments, num: true },
+              { key: 'finals', label: 'Finals', value: (l) => l.finals, num: true },
+              { key: 'titles', label: 'Siege', value: (l) => l.titles, num: true },
+              {
+                key: 'form',
+                label: 'Form',
+                value: (l) => l.form.slice(-3).reduce<number>((k, x) => k + (x ?? 0), 0),
+                render: (l) => (
+                  <span className="form">
+                    {l.form.slice(-5).map((x, i) => (
+                      <span key={i} className={x === null ? 'f-none' : x >= 10 ? 'f-top' : x >= 5 ? 'f-mid' : 'f-low'} title={x === null ? 'nicht dabei' : `${x} Punkte`}>
+                        {x ?? '–'}
+                      </span>
+                    ))}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        )}
+      </section>
+
+      {table.artists.length > 0 && (
+        <section className="card">
+          <h3>Interpreten der Saison</h3>
+          <BarList
+            rows={table.artists.slice(0, 10).map((a) => ({
+              key: a.name,
+              label: a.name,
+              sub: `${a.songs} ${a.songs === 1 ? 'Song' : 'Songs'}${a.titles ? ` · ${a.titles}× Sieg` : ''}`,
+              value: a.points,
+              display: `${a.points} P.`,
+            }))}
+          />
+        </section>
+      )}
+
+      <section className="card">
+        <h3>Turniere dieser Saison</h3>
+        <div className="tlist">
+          {[...table.finished, ...table.running].map((t) => {
+            const st = computeState(t);
+            const champ = st.champion ? participantMap(t).get(st.champion) : undefined;
+            return (
+              <div className="titem" key={t.id}>
+                <div className="grow">
+                  <strong>{t.name}</strong>
+                  <div className="small muted">
+                    {champ ? `🏆 ${champ.title}` : 'läuft'} · {t.draw.length} {t.artistMode ? 'Künstler' : 'Songs'} · {fmtDate(t.createdAt)}
+                  </div>
+                </div>
+                <button className="btn small ghost" onClick={() => go({ page: st.finished ? 'result' : 'play', id: t.id })}>
+                  Öffnen
+                </button>
+                <button
+                  className="btn small ghost danger"
+                  onClick={() => {
+                    saveTournament({ ...t, seasonId: undefined });
+                    toast('Turnier aus der Saison genommen.');
+                  }}
+                >
+                  Aus Saison nehmen
+                </button>
+              </div>
+            );
+          })}
+          {table.finished.length + table.running.length === 0 && <p className="muted small">Noch keine Turniere. Wähle beim Turnierstart diese Saison aus oder füge ein vorhandenes hinzu.</p>}
+        </div>
+        {free.length > 0 && (
+          <div className="row" style={{ marginTop: 12 }}>
+            <select value={add} onChange={(e) => setAdd(e.target.value)} aria-label="Turnier hinzufügen" style={{ flex: 1, minWidth: 200 }}>
+              <option value="">Vorhandenes Turnier hinzufügen …</option>
+              {free.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({fmtDate(t.createdAt)})
+                </option>
+              ))}
+            </select>
+            <button
+              className="btn small"
+              disabled={!add}
+              onClick={() => {
+                const t = tournaments.find((x) => x.id === add);
+                if (t) saveTournament({ ...t, seasonId: season.id });
+                setAdd('');
+              }}
+            >
+              Hinzufügen
+            </button>
+          </div>
+        )}
+      </section>
+
+      {confirmDelete && (
+        <Modal
+          title="Saison löschen?"
+          onClose={() => setConfirmDelete(false)}
+          actions={
+            <>
+              <button className="btn ghost" onClick={() => setConfirmDelete(false)}>
+                Abbrechen
+              </button>
+              <button
+                className="btn danger"
+                onClick={() => {
+                  deleteSeason(season.id);
+                  setConfirmDelete(false);
+                  go({ page: 'stats' });
+                }}
+              >
+                Saison löschen
+              </button>
+            </>
+          }
+        >
+          <p>Die Tabelle von „{season.name}“ verschwindet. Die Turniere selbst bleiben erhalten.</p>
+        </Modal>
+      )}
+    </div>
+  );
 }
