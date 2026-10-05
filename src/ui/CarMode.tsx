@@ -241,12 +241,53 @@ function useCarPlayback(host: React.RefObject<HTMLDivElement | null>, localAudio
 
 /** The Spotify player host stays the same element on every screen, so the player is never rebuilt. */
 function CarShell({ host, children }: { host: React.RefObject<HTMLDivElement | null>; children: React.ReactNode }) {
+  const scale = useCarScale();
   return (
     <div className="car">
-      <div className="car-content">{children}</div>
-      <div className="car-embed" ref={host} />
+      <div
+        className="car-scale"
+        style={scale.zoom === 1 ? undefined : { zoom: scale.zoom, width: scale.width, height: scale.height }}
+      >
+        <div className="car-content">{children}</div>
+        <div className="car-embed" ref={host} />
+      </div>
     </div>
   );
+}
+
+/** Design size of the car screen (a typical phone in CSS pixels). */
+const DESIGN_W = 412;
+const DESIGN_H = 860;
+
+/**
+ * "Desktop-Website" in Chrome on Android lays the page out ~980px wide, which would make the car
+ * screen tiny. Spotify only plays full songs in that mode, so the car screen scales itself up to
+ * look exactly like the phone layout. On a normal phone the scale stays 1.
+ */
+export function carScale(w: number, h: number): { zoom: number; width: number; height: number } {
+  const z = Math.min(w / DESIGN_W, h / DESIGN_H);
+  const zoom = z > 1.15 ? Math.min(z, 4) : 1;
+  return { zoom, width: w / zoom, height: h / zoom };
+}
+
+function useCarScale() {
+  const read = () => carScale(window.innerWidth, window.innerHeight);
+  const [s, setS] = useState(read);
+  useEffect(() => {
+    const on = () => setS(read());
+    window.addEventListener('resize', on);
+    window.addEventListener('orientationchange', on);
+    return () => {
+      window.removeEventListener('resize', on);
+      window.removeEventListener('orientationchange', on);
+    };
+  }, []);
+  return s;
+}
+
+/** Phone in the normal mobile layout (Spotify embed would only play previews there). */
+function isMobileLayout(): boolean {
+  return navigator.maxTouchPoints > 0 && window.innerWidth < 700;
 }
 
 // ---------------------------------------------------------------------------
@@ -514,6 +555,13 @@ export function CarMode({ id }: { id: string }) {
                   </button>
                 </div>
               </div>
+              {isMobileLayout() && (
+                <div className="notice warn small">
+                  <strong>Für ganze Spotify-Songs:</strong> In Chrome oben rechts auf ⋮ tippen und <strong>„Desktop-Website“</strong> anhaken.
+                  Sonst spielt Spotify auf dem Handy nur 30-Sekunden-Vorschauen. Der Fahrmodus sieht danach genauso aus. (Geht im
+                  Chrome-Tab, nicht in der installierten App.)
+                </div>
+              )}
               <div className="notice small">
                 Handy in die Halterung, dann nur noch kurz tippen. Entschieden wird mit einem Tipp oder beim nächsten Halt – alles
                 wird gespeichert. Die Weiter-Taste am Lenkrad springt zum nächsten Song (wenn dein Auto das unterstützt).
@@ -670,7 +718,14 @@ export function CarMode({ id }: { id: string }) {
           {fmtSeconds(st.position)} / {fmtSeconds(prefs.length === 'snippet' && st.duration ? Math.min(SNIPPET, st.duration) : st.duration)}
         </div>
         {st.needsTap && <div className="notice warn small">Spotify startet nicht von selbst – tippe unten im Spotify-Player einmal auf ▶.</div>}
-        {st.preview && <div className="notice small">Spotify spielt nur die 30-Sekunden-Vorschau. Für ganze Songs in Chrome bei open.spotify.com einloggen.</div>}
+        {st.preview && (
+          <div className="notice small">
+            Spotify spielt nur die 30-Sekunden-Vorschau.{' '}
+            {isMobileLayout()
+              ? 'Auf dem Handy: Chrome-Menü ⋮ → „Desktop-Website“ anhaken, dann laufen ganze Songs.'
+              : 'Für ganze Songs in Chrome bei open.spotify.com einloggen.'}
+          </div>
+        )}
         {st.error && <div className="notice warn small">{st.error} Tippe auf ⏭, um weiterzumachen.</div>}
 
         {prefs.style === 'buttons' ? (
