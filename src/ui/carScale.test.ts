@@ -8,7 +8,7 @@ describe('car mode scaling', () => {
   });
   it('scales up in Chrome "Desktop-Website" mode so it looks like the phone layout', () => {
     const s = carScale(980, 1990);
-    expect(s.zoom).toBeCloseTo(980 / 412, 1);
+    expect(s.zoom).toBeCloseTo(Math.min(980 / 412, 1990 / 860), 6);
     expect(s.width * s.zoom).toBeCloseTo(980, 6);
     expect(s.height * s.zoom).toBeCloseTo(1990, 6);
   });
