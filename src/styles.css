@@ -455,6 +455,7 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-directio
 
 /* Car mode: huge targets, high contrast, nothing to read while driving */
 .car { position: fixed; inset: 0; z-index: 80; background: #07070b; color: var(--text); display: flex; flex-direction: column; overflow: hidden; }
+.car-scale { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .car-content { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .car-top { display: flex; align-items: center; gap: 12px; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; border-bottom: 1px solid var(--line); }
 .car-body { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 16px; max-width: 760px; width: 100%; margin: 0 auto; }
